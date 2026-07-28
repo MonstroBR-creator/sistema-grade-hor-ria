@@ -1,6 +1,7 @@
 /**
  * SERVER.JS - API REST Express / SQLite e Servidor Estático
- * Desenvolvido por Monstro Tecnologias
+ * Arquitetura: Clean Code / REST API
+ * Desenvolvido por RASM Tecnologia
  */
 
 const express = require('express');
@@ -18,9 +19,11 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Servidor de arquivos estáticos da pasta frontend
 const FRONTEND_PATH = path.join(__dirname, '..', 'frontend');
 app.use(express.static(FRONTEND_PATH));
 
+// Conexão com o Banco SQLite
 const DB_PATH = path.join(__dirname, 'database', 'grade_horaria.db');
 
 if (!fs.existsSync(path.join(__dirname, 'database'))) {
@@ -39,7 +42,8 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
 db.run('PRAGMA foreign_keys = ON;');
 
 /**
- * MIGRATION AUTOMÁTICA: Garante tabela e adciona coluna se faltar
+ * MIGRATION AUTOMÁTICA
+ * Garante que a tabela exista e cria a coluna 'criado_em' caso não exista
  */
 function garantirTabelaUsuarios() {
   const sqlCreate = `
@@ -55,16 +59,11 @@ function garantirTabelaUsuarios() {
   
   db.run(sqlCreate, (err) => {
     if (err) {
-      console.error('⚠️ Erro ao criar tabela usuarios:', err.message);
+      console.error('⚠️ Erro ao validar tabela usuarios:', err.message);
     } else {
-      console.log('✅ Tabela "usuarios" validada.');
-      // Adiciona a coluna criado_em se ela não existir
-      db.run(`ALTER TABLE usuarios ADD COLUMN criado_em DATETIME DEFAULT CURRENT_TIMESTAMP`, (alterErr) => {
-        if (alterErr) {
-          // Se a coluna já existir, ele só ignora o erro silenciosamente
-        } else {
-          console.log('✨ Coluna "criado_em" adicionada via Migration!');
-        }
+      console.log('✅ Tabela "usuarios" validada com sucesso.');
+      db.run(`ALTER TABLE usuarios ADD COLUMN criado_em DATETIME DEFAULT CURRENT_TIMESTAMP`, () => {
+        // Ignora caso a coluna já exista
       });
     }
   });
@@ -91,7 +90,7 @@ app.post('/api/login', (req, res) => {
   `;
   
   db.get(query, [termoLimpo, termoLimpo, cpfApenasNumeros], (err, usuario) => {
-    if (err) return res.status(500).json({ sucesso: false, mensagem: 'Erro no banco.' });
+    if (err) return res.status(500).json({ sucesso: false, mensagem: 'Erro interno no banco de dados.' });
 
     if (!usuario || usuario.senha_hash !== String(senha).trim()) {
       return res.status(401).json({ sucesso: false, mensagem: 'Usuário/CPF ou senha incorretos.' });
@@ -116,7 +115,7 @@ app.post('/api/login', (req, res) => {
    2. GESTÃO DE USUÁRIOS (CRUD)
    ========================================== */
 
-// Consulta limpa sem dependência estrita de criado_em
+// Listar todos os usuários
 app.get('/api/usuarios', (req, res) => {
   const query = `SELECT id, nome, usuario, cpf, perfil FROM usuarios ORDER BY id DESC`;
   db.all(query, [], (err, rows) => {
@@ -128,6 +127,7 @@ app.get('/api/usuarios', (req, res) => {
   });
 });
 
+// Cadastrar novo usuário
 app.post('/api/usuarios', (req, res) => {
   const { nome, usuario, cpf, senha_hash, perfil } = req.body;
 
@@ -146,7 +146,7 @@ app.post('/api/usuarios', (req, res) => {
   db.run(sql, [nome.trim(), userLimpo, cpfLimpo, senha_hash.trim(), perfil || 'USUARIO'], function(err) {
     if (err) {
       if (err.message.includes('UNIQUE')) {
-        return res.status(400).json({ sucesso: false, mensagem: 'Usuário ou CPF já cadastrado.' });
+        return res.status(400).json({ sucesso: false, mensagem: 'Nome de usuário ou CPF já cadastrado.' });
       }
       return res.status(500).json({ sucesso: false, mensagem: err.message });
     }
@@ -154,16 +154,23 @@ app.post('/api/usuarios', (req, res) => {
   });
 });
 
-// Excluir usuário (Protegendo admin)
+// Excluir usuário pelo ID
+// Trava flexível: Bloqueia a exclusão do seu usuário máster (ou previne a exclusão do último administrador)
 app.delete('/api/usuarios/:id', (req, res) => {
   const { id } = req.params;
 
-  db.get(`SELECT usuario FROM usuarios WHERE id = ?`, [id], (err, u) => {
+  db.get(`SELECT usuario, perfil FROM usuarios WHERE id = ?`, [id], (err, u) => {
     if (err) return res.status(500).json({ sucesso: false, mensagem: err.message });
     if (!u) return res.status(404).json({ sucesso: false, mensagem: 'Usuário não encontrado.' });
 
-    if (u.usuario.toLowerCase() === 'admin') {
-      return res.status(403).json({ sucesso: false, mensagem: 'O usuário admin principal é protegido e não pode ser excluído.' });
+    // Define os logins máster protegidos da RASM Tecnologia (adicione seu login se desejar)
+    const PROTECTED_USERS = ['monstro', 'monstrobr', 'rasmadmin'];
+
+    if (PROTECTED_USERS.includes(u.usuario.toLowerCase())) {
+      return res.status(403).json({ 
+        sucesso: false, 
+        mensagem: `Ação negada: O usuário administrador máster (${u.usuario}) é protegido!` 
+      });
     }
 
     db.run(`DELETE FROM usuarios WHERE id = ?`, [id], function(err) {
@@ -174,7 +181,7 @@ app.delete('/api/usuarios/:id', (req, res) => {
 });
 
 /* ==========================================
-   3. GRADE HORÁRIA E ALOCAÇÕES
+   3. CONSULTAS DA GRADE HORÁRIA E ALOCAÇÕES
    ========================================== */
 
 app.get('/api/turmas', (req, res) => {
@@ -229,7 +236,7 @@ app.delete('/api/grade', (req, res) => {
 });
 
 /* ==========================================
-   4. ROTAS DE PÁGINAS
+   4. ROTAS DE PÁGINAS E NAVEGAÇÃO
    ========================================== */
 
 app.get('/login', (req, res) => res.sendFile(path.join(FRONTEND_PATH, 'login.html')));
@@ -242,5 +249,5 @@ app.get('/', (req, res) => res.sendFile(path.join(FRONTEND_PATH, 'index.html')))
 app.get('/index.html', (req, res) => res.sendFile(path.join(FRONTEND_PATH, 'index.html')));
 
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor Monstro Tecnologias rodando na porta: ${PORT}`);
+  console.log(`🚀 Servidor RASM Tecnologia rodando na porta: ${PORT}`);
 });

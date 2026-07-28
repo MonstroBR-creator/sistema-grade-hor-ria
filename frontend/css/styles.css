@@ -1,0 +1,29 @@
+/* Card Arrastável */
+.card-materia {
+  cursor: grab;
+  transition: all 0.2s ease-in-out;
+}
+
+.card-materia:active {
+  cursor: grabbing;
+  opacity: 0.6;
+}
+
+/* Animação e Estilo do Conflito */
+.celula-conflito {
+  background-color: #fee2e2 !important; /* Red 100 */
+  border: 2px solid #ef4444 !important; /* Red 500 */
+  color: #991b1b !important;
+  animation: piscar 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes piscar {
+  from { border-color: #ef4444; }
+  to { border-color: #b91c1c; }
+}
+
+/* Área de Drop Highlight */
+.celula-hover {
+  background-color: #eff6ff !important; /* Blue 50 */
+  border: 2px dashed #3b82f6 !important; /* Blue 500 */
+}

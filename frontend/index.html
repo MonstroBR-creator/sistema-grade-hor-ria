@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Painel - Gestor de Grade Horária</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-100 min-h-screen">
+
+  <!-- Header Topo -->
+  <header class="bg-slate-800 text-white px-6 py-4 shadow flex justify-between items-center">
+    <div class="flex items-center gap-3">
+      <div class="bg-blue-600 p-2 rounded-lg font-bold text-xl">🏫</div>
+      <div>
+        <h1 class="font-bold text-lg leading-none">CEEBJA / EJA — Gestão de Grade</h1>
+        <p id="badge-turno" class="text-xs text-blue-300 mt-1 font-semibold">TURNO: -</p>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-3">
+      <!-- Botão Visível Apenas para MESTRE / ADMIN -->
+      <button 
+        id="btn-modal-usuarios" 
+        onclick="abrirModalUsuarios()" 
+        class="hidden bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3 py-1.5 rounded transition-all cursor-pointer flex items-center gap-1 shadow"
+      >
+        👤 Gerenciar Usuários
+      </button>
+
+      <span id="nome-usuario" class="text-xs bg-slate-700 px-3 py-1.5 rounded-full text-slate-200 font-medium">Carregando...</span>
+      <button 
+        id="btn-logout" 
+        onclick="logout()" 
+        class="bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded transition-all cursor-pointer"
+      >
+        Sair 🚪
+      </button>
+    </div>
+  </header>
+
+  <!-- Container Conteúdo -->
+  <main class="p-6 max-w-7xl mx-auto grid grid-cols-12 gap-6">
+
+    <!-- Sidebar de Disciplinas -->
+    <aside class="col-span-12 md:col-span-4 bg-white p-4 rounded-xl shadow border border-slate-200">
+      <h2 class="font-bold text-slate-800 text-sm mb-3 uppercase tracking-wider">Turma Selecionada</h2>
+      
+      <select id="select-turma" class="w-full p-2 border border-slate-300 rounded-lg text-sm font-medium mb-4 focus:ring-2 focus:ring-blue-500 outline-none">
+        <option value="">Carregando turmas...</option>
+      </select>
+
+      <h3 class="font-bold text-slate-700 text-xs mb-2 uppercase tracking-wider">Disciplinas / Docentes (Arraste)</h3>
+      <div id="lista-cards" class="max-h-[500px] overflow-y-auto pr-1">
+        <!-- Cards injetados via app.js -->
+      </div>
+    </aside>
+
+    <!-- Tabela da Grade Horária -->
+    <section class="col-span-12 md:col-span-8 bg-white p-4 rounded-xl shadow border border-slate-200">
+      <div id="alerta-conflito" class="hidden mb-4 p-3 bg-amber-50 border border-amber-300 text-amber-800 text-xs rounded-lg font-bold">
+        <span id="texto-conflito">⚠️ Conflito de docente detectado neste horário!</span>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-center border-collapse">
+          <thead>
+            <tr class="bg-slate-100 text-slate-700 text-xs font-bold uppercase">
+              <th class="p-2 border border-slate-200 w-24">Horário</th>
+              <th class="p-2 border border-slate-200">Segunda</th>
+              <th class="p-2 border border-slate-200">Terça</th>
+              <th class="p-2 border border-slate-200">Quarta</th>
+              <th class="p-2 border border-slate-200">Quinta</th>
+              <th class="p-2 border border-slate-200">Sexta</th>
+            </tr>
+          </thead>
+          <tbody id="corpo-tabela-grade">
+            <!-- Linhas geradas via app.js -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- MODAL DE CADASTRO E GESTÃO DE USUÁRIOS -->
+  <div id="modal-usuarios" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-2xl w-full p-6 relative">
+      <button onclick="fecharModalUsuarios()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
+
+      <h2 class="text-lg font-bold text-slate-800 mb-1 flex items-center gap-2">
+        👤 Cadastro e Gestão de Usuários
+      </h2>
+      <p class="text-xs text-slate-500 mb-4">Crie e remova acessos ao sistema de grade horária.</p>
+
+      <!-- Formulário de Novo Usuário -->
+      <form id="form-novo-usuario" onsubmit="salvarNovoUsuario(event)" class="grid grid-cols-12 gap-3 mb-6 bg-slate-50 p-4 rounded-lg border border-slate-200">
+        <div class="col-span-12 sm:col-span-6">
+          <label class="block text-[11px] font-bold text-slate-700 uppercase mb-1">Nome Completo</label>
+          <input type="text" id="usr-nome" required placeholder="Ex: Maria Souza" class="w-full p-2 border border-slate-300 rounded text-xs outline-none" />
+        </div>
+
+        <div class="col-span-12 sm:col-span-6">
+          <label class="block text-[11px] font-bold text-slate-700 uppercase mb-1">CPF (Opcional)</label>
+          <input type="text" id="usr-cpf" placeholder="000.000.000-00" class="w-full p-2 border border-slate-300 rounded text-xs outline-none" />
+        </div>
+
+        <div class="col-span-12 sm:col-span-4">
+          <label class="block text-[11px] font-bold text-slate-700 uppercase mb-1">Usuário (Login)</label>
+          <input type="text" id="usr-usuario" required placeholder="maria.souza" class="w-full p-2 border border-slate-300 rounded text-xs outline-none" />
+        </div>
+
+        <div class="col-span-12 sm:col-span-4">
+          <label class="block text-[11px] font-bold text-slate-700 uppercase mb-1">Senha</label>
+          <input type="password" id="usr-senha" required placeholder="••••••••" class="w-full p-2 border border-slate-300 rounded text-xs outline-none" />
+        </div>
+
+        <div class="col-span-12 sm:col-span-4">
+          <label class="block text-[11px] font-bold text-slate-700 uppercase mb-1">Perfil de Acesso</label>
+          <select id="usr-perfil" class="w-full p-2 border border-slate-300 rounded text-xs outline-none bg-white font-medium">
+            <option value="PEDAGOGIA">PEDAGOGIA</option>
+            <option value="MESTRE">MESTRE (Admin)</option>
+          </select>
+        </div>
+
+        <div class="col-span-12 text-right mt-1">
+          <button type="submit" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded shadow cursor-pointer">
+            + Cadastrar Usuário
+          </button>
+        </div>
+      </form>
+
+      <!-- Tabela de Usuários Cadastrados -->
+      <h3 class="text-xs font-bold text-slate-700 uppercase mb-2">Usuários Cadastrados</h3>
+      <div class="max-h-48 overflow-y-auto border border-slate-200 rounded-lg">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-100 text-slate-600 uppercase font-bold border-b border-slate-200">
+            <tr>
+              <th class="p-2">Nome</th>
+              <th class="p-2">Usuário</th>
+              <th class="p-2">CPF</th>
+              <th class="p-2">Perfil</th>
+              <th class="p-2 text-center">Ações</th>
+            </tr>
+          </thead>
+          <tbody id="tabela-usuarios-corpo">
+            <!-- Linhas inseridas via JS -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

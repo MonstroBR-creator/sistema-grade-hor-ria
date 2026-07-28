@@ -6,9 +6,10 @@
   <title>Acesso ao Sistema — Gestão de Grade Horária</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-slate-100 min-h-screen flex items-center justify-center p-4">
+<body class="bg-slate-100 min-h-screen flex flex-col items-center justify-between p-4">
 
-  <div class="max-w-md w-full bg-white rounded-xl shadow-lg border border-slate-200 p-8">
+  <!-- CONTAINER CENTRAL DE LOGIN -->
+  <div class="my-auto max-w-md w-full bg-white rounded-xl shadow-lg border border-slate-200 p-8">
     <div class="text-center mb-8">
       <div class="bg-blue-600 text-white w-12 h-12 rounded-lg flex items-center justify-center font-bold text-xl mx-auto mb-3 shadow">
         🏫
@@ -17,7 +18,7 @@
       <p class="text-xs text-slate-500 mt-1">CEEBJA / EJA — Acesso Administrativo</p>
     </div>
 
-    <!-- Alertas -->
+    <!-- Alertas de Erro / Sucesso -->
     <div id="alerta-erro" class="hidden mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg font-medium"></div>
     <div id="alerta-sucesso" class="hidden mb-4 p-3 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs rounded-lg font-medium"></div>
 
@@ -28,7 +29,7 @@
           type="text" 
           id="identificador" 
           required 
-          placeholder="admin ou 00000000000"
+          placeholder="Digite seu Usuário ou CPF"
           class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
         />
       </div>
@@ -52,16 +53,21 @@
         <span>Entrar no Sistema</span>
       </button>
     </form>
-
-    <div class="mt-6 text-center border-t border-slate-100 pt-4">
-      <p class="text-[11px] text-slate-400">Credenciais padrão:<br>Usuário: <b>admin</b> | CPF: <b>00000000000</b><br>Senha: <b>admin123</b></p>
-    </div>
   </div>
 
-  <!-- SCRIPT DIRETO NO HTML PARA EVITAR ERROS DE CARREGAMENTO / PATH -->
+  <!-- RODAPÉ INSTITUCIONAL MONSTRO TECNOLOGIAS -->
+  <footer class="w-full text-center py-4 text-slate-400 text-xs space-y-1">
+    <p class="font-medium text-slate-500">
+      Desenvolvido por <strong class="text-slate-700">Monstro Tecnologias</strong> — CNPJ: 33.131.697/0001-99
+    </p>
+    <p class="text-[11px]">
+      &copy; 2024–2026 Monstro Tecnologias. Todos os direitos reservados.
+    </p>
+  </footer>
+
+  <!-- SCRIPT INTEGRAL DE AUTENTICAÇÃO -->
   <script>
     async function fazerLogin(event) {
-      // Bloqueia recarregamento padrao da pagina
       event.preventDefault();
 
       const identificador = document.getElementById('identificador').value.trim();

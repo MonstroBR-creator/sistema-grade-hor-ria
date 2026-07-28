@@ -11,23 +11,28 @@ const PORT = process.env.PORT || 10000;
 app.use(cors());
 app.use(express.json());
 
-// --- LOCALIZAÇÃO INTELIGENTE DOS ARQUIVOS DO FRONTEND ---
-// Tenta achar 'public' no diretório pai, no diretório atual ou serve a raiz do projeto
-let staticPath = path.join(__dirname, '..', 'public');
+// --- MAPEAMENTO INTELIGENTE DA PASTA DO FRONTEND ---
+// Procura o index.html nos locais mais comuns de um projeto Node.js
+const possiveisCaminhos = [
+  path.join(__dirname, '..', 'public'), // Raiz/public
+  path.join(__dirname, '..'),           // Raiz do projeto (se o index.html estiver solto lá)
+  path.join(__dirname, 'public'),      // backend/public
+  path.join(__dirname, '..', 'frontend') // Raiz/frontend
+];
 
-if (!fs.existsSync(staticPath)) {
-  staticPath = path.join(__dirname, 'public');
-}
-if (!fs.existsSync(staticPath)) {
-  staticPath = path.join(__dirname, '..'); // Se o index.html estiver solto na raiz do projeto
-}
+let staticPath = possiveisCaminhos.find(caminho => {
+  const indexExiste = fs.existsSync(path.join(caminho, 'index.html'));
+  if (indexExiste) {
+    console.log(`✅ Front-end encontrado em: ${caminho}`);
+  }
+  return indexExiste;
+}) || path.join(__dirname, '..'); // Fallback para a raiz se não encontrar
 
 console.log('Servindo arquivos estáticos de:', staticPath);
 app.use(express.static(staticPath));
 
-// --- CONEXÃO COM O BANCO DE DADOS ---
+// --- CONEXÃO BANCO DE DADOS SQLITE ---
 const dbPath = path.join(__dirname, 'database', 'grade_horaria.db');
-
 console.log('Conectando ao banco SQLite em:', dbPath);
 
 const db = new sqlite3.Database(dbPath, (err) => {
@@ -46,7 +51,6 @@ app.get('/api/health', (req, res) => {
 
 app.get('/api/turmas', (req, res) => {
   const query = 'SELECT * FROM turmas';
-  
   db.all(query, [], (err, rows) => {
     if (err) {
       console.error('Erro ao buscar turmas:', err.message);
@@ -58,7 +62,6 @@ app.get('/api/turmas', (req, res) => {
 
 app.get('/api/disciplinas', (req, res) => {
   const query = 'SELECT * FROM disciplinas';
-  
   db.all(query, [], (err, rows) => {
     if (err) {
       console.error('Erro ao buscar disciplinas:', err.message);
@@ -71,7 +74,6 @@ app.get('/api/disciplinas', (req, res) => {
 app.get('/api/grade/:turmaId', (req, res) => {
   const { turmaId } = req.params;
   const query = 'SELECT * FROM grade_horaria WHERE turma_id = ?';
-  
   db.all(query, [turmaId], (err, rows) => {
     if (err) {
       console.error('Erro ao buscar grade:', err.message);
@@ -81,13 +83,17 @@ app.get('/api/grade/:turmaId', (req, res) => {
   });
 });
 
-// Rota coringa para entregar o index.html principal
+// Rota Coringa para servir o index.html principal
 app.get('*', (req, res) => {
   const indexPath = path.join(staticPath, 'index.html');
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
   } else {
-    res.status(404).send('Arquivo index.html não foi encontrado na pasta estática.');
+    res.status(404).send(`
+      <h2>Erro 404 - Front-end não encontrado</h2>
+      <p>O servidor está online, mas não encontrou o arquivo <b>index.html</b> nos diretórios mapeados.</p>
+      <p>Diretório verificado: <code>${staticPath}</code></p>
+    `);
   }
 });
 

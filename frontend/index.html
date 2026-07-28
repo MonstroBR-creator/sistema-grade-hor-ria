@@ -3,35 +3,77 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sistema de Grade Horária e Alocações — CEEBJA</title>
+  <title>Grade Horária Interativa — CEEBJA</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .slot-aula.drag-over {
+      background-color: #e0f2fe;
+      border-color: #0284c7;
+    }
+  </style>
 </head>
-<body class="bg-slate-100 min-h-screen p-4 md:p-8">
+<body class="bg-slate-100 min-h-screen p-4 md:p-6">
 
-  <div class="max-w-6xl mx-auto bg-white rounded-xl shadow-lg border border-slate-200 p-6">
-    <div class="flex flex-col md:flex-row md:items-center justify-between border-b border-slate-200 pb-4 mb-6 gap-4">
+  <div class="max-w-7xl mx-auto space-y-6">
+    
+    <!-- CABEÇALHO E FILTRO ÚNICO -->
+    <div class="bg-white rounded-xl shadow-md border border-slate-200 p-6">
+      <div class="mb-4">
+        <h1 class="text-2xl font-bold text-slate-800">Quadro e Montagem da Grade Horária</h1>
+        <p class="text-xs text-slate-500">CEEBJA / EJA — Arraste as matérias para preencher os horários das aulas</p>
+      </div>
+
       <div>
-        <h1 class="text-2xl font-bold text-slate-800">Grade Horária & Quadro de Docentes</h1>
-        <p class="text-xs text-slate-500">Gestão do CEEBJA — Presencial e Semipresencial</p>
+        <label for="select-turma-unica" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+          Selecione a Turma / Módulo:
+        </label>
+        <select id="select-turma-unica" class="w-full p-3 bg-white border border-slate-300 rounded-lg text-sm font-medium text-slate-700 shadow-sm focus:ring-2 focus:ring-blue-500 outline-none">
+          <option value="">Carregando turmas...</option>
+        </select>
       </div>
     </div>
 
-    <!-- FILTRO ÚNICO CENTRALIZADO -->
-    <div class="mb-8">
-      <label for="select-turma-unica" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-        Selecione o Turno / Módulo / Turma:
-      </label>
-      <select id="select-turma-unica" class="w-full p-3 bg-white border border-slate-300 rounded-lg text-sm font-medium text-slate-700 shadow-sm focus:ring-2 focus:ring-blue-500 outline-none">
-        <option value="">Carregando opções...</option>
-      </select>
+    <!-- ÁREA DE ALERTA DE ERRO/CONFLITO -->
+    <div id="painel-alerta" class="hidden p-4 bg-red-100 border-l-4 border-red-500 text-red-700 text-sm font-semibold rounded shadow-sm"></div>
+
+    <!-- PAINEL PRINCIPAL: CARDS DISPONÍVEIS + QUADRO DE HORÁRIOS -->
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+      
+      <!-- COLUNA DA ESQUERDA: CARDS/DISCIPLINAS DISPONÍVEIS -->
+      <div class="lg:col-span-1 bg-white rounded-xl shadow-md border border-slate-200 p-4">
+        <h2 class="text-sm font-bold text-slate-700 uppercase tracking-wider mb-3 pb-2 border-b">
+          Matérias / Alocações
+        </h2>
+        <div id="container-cards-disponiveis" class="space-y-3 max-h-[600px] overflow-y-auto pr-1">
+          <p class="text-xs text-slate-400 italic text-center py-4">Selecione uma turma no filtro.</p>
+        </div>
+      </div>
+
+      <!-- COLUNA DA DIREITA: QUADRO DE HORÁRIOS (SEGUNDA A SEXTA) -->
+      <div class="lg:col-span-3 bg-white rounded-xl shadow-md border border-slate-200 p-4 overflow-x-auto">
+        <h2 class="text-sm font-bold text-slate-700 uppercase tracking-wider mb-3 pb-2 border-b">
+          Grade de Horários Semanal
+        </h2>
+
+        <table class="w-full border-collapse border border-slate-200 text-xs text-center min-w-[600px]">
+          <thead>
+            <tr class="bg-slate-800 text-white">
+              <th class="p-2 border border-slate-300 w-16">Aula</th>
+              <th class="p-2 border border-slate-300">Segunda</th>
+              <th class="p-2 border border-slate-300">Terça</th>
+              <th class="p-2 border border-slate-300">Quarta</th>
+              <th class="p-2 border border-slate-300">Quinta</th>
+              <th class="p-2 border border-slate-300">Sexta</th>
+            </tr>
+          </thead>
+          <tbody id="corpo-quadro-grade">
+            <!-- As 5 aulas x 5 dias serão geradas dinamicamente via JS -->
+          </tbody>
+        </table>
+      </div>
+
     </div>
 
-    <!-- ÁREA DE EXIBIÇÃO EM CARDS -->
-    <div id="container-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      <div class="col-span-full p-8 text-center bg-slate-50 rounded-lg border-2 border-dashed border-slate-200 text-slate-400 text-sm">
-        Selecione uma opção no filtro acima para carregar os cards das disciplinas e professores.
-      </div>
-    </div>
   </div>
 
   <script src="js/app.js"></script>

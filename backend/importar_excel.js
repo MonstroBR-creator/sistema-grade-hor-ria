@@ -16,29 +16,28 @@ if (!fs.existsSync(pastaDb)) {
   fs.mkdirSync(pastaDb, { recursive: true });
 }
 
-// Remove o banco antigo para recriar com a estrutura correta das colunas
 if (fs.existsSync(dbPath)) {
   try {
     fs.unlinkSync(dbPath);
-    console.log('🗑️ Banco antigo removido para recriação limpa.');
+    console.log('🗑️ Banco antigo removido para atualização de schema com Turno, Ensino e Módulo.');
   } catch (err) {
-    console.warn('⚠️ Não foi possível apagar o banco diretamente, sobrescrevendo dados...');
+    console.warn('⚠️ Sobrescrevendo dados do banco existente...');
   }
 }
 
 const db = new sqlite3.Database(dbPath);
-
-console.log('📊 Lendo arquivo backend/data/professores.xlsx...');
 const workbook = XLSX.readFile(caminhoExcel);
 const primeiraAba = workbook.SheetNames[0];
 const dados = XLSX.utils.sheet_to_json(workbook.Sheets[primeiraAba]);
 
-console.log(`✅ ${dados.length} linhas lidas da planilha.`);
-
 db.serialize(() => {
+  // Criar tabela de turmas com metadados estruturados
   db.run(`CREATE TABLE IF NOT EXISTS turmas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nome TEXT UNIQUE
+    nome TEXT UNIQUE,
+    turno TEXT,
+    ensino TEXT,
+    modulo TEXT
   )`);
 
   db.run(`CREATE TABLE IF NOT EXISTS grade_horaria (
@@ -50,40 +49,49 @@ db.serialize(() => {
     FOREIGN KEY(turma_id) REFERENCES turmas(id)
   )`);
 
-  const stmtTurma = db.prepare('INSERT OR IGNORE INTO turmas (nome) VALUES (?)');
+  const stmtTurma = db.prepare('INSERT OR IGNORE INTO turmas (nome, turno, ensino, modulo) VALUES (?, ?, ?, ?)');
   const stmtGrade = db.prepare('INSERT INTO grade_horaria (turma_id, disciplina, turma_letra, professor) VALUES (?, ?, ?, ?)');
 
-  // 1. Cadastra os nomes dos Módulos/Turmas
   dados.forEach(row => {
-    const descrita = row['TURMA DESCRITA'];
-    const letra = row['TURMA'];
-    
+    const descrita = row['TURMA DESCRITA'] ? String(row['TURMA DESCRITA']).trim() : '';
+    const letra = row['TURMA'] ? String(row['TURMA']).trim() : '';
+
     if (descrita) {
-      // Cria um nome completo combinando Descrição + Letra da Turma
-      const nomeCompleto = letra ? `${descrita.trim()} (Turma ${letra.trim()})` : descrita.trim();
-      stmtTurma.run(nomeCompleto);
+      const nomeCompleto = letra ? `${descrita} (Turma ${letra})` : descrita;
+
+      // Extração inteligente de Turno, Ensino e Módulo
+      let turno = 'OUTRO';
+      if (descrita.toUpperCase().includes('MANHÃ')) turno = 'MANHÃ';
+      else if (descrita.toUpperCase().includes('NOITE')) turno = 'NOITE';
+      else if (descrita.toUpperCase().includes('TARDE')) turno = 'TARDE';
+
+      let ensino = 'OUTRO';
+      if (descrita.toUpperCase().includes('FUNDAMENTAL')) ensino = 'FUNDAMENTAL';
+      else if (descrita.toUpperCase().includes('MÉDIO') || descrita.toUpperCase().includes('MEDIO')) ensino = 'MÉDIO';
+
+      // Pega a primeira palavra/termo (ex: "1º MÓDULO", "2º MÓDULO")
+      const moduloMatch = descrita.match(/\d+º\s*MÓDULO|\d+º\s*MODULO/i);
+      const modulo = moduloMatch ? moduloMatch[0].toUpperCase() : 'GERAL';
+
+      stmtTurma.run(nomeCompleto, turno, ensino, modulo);
     }
   });
 
   stmtTurma.finalize(() => {
     db.all('SELECT id, nome FROM turmas', [], (err, turmasBanco) => {
-      if (err) {
-        console.error('❌ Erro ao consultar turmas:', err.message);
-        return;
-      }
+      if (err) return console.error('Erro:', err);
 
       const mapaTurmas = {};
       turmasBanco.forEach(t => mapaTurmas[t.nome] = t.id);
 
-      // 2. Mapeia e insere Disciplinas, Turma e Professores do "NOME SUPRIDO"
       dados.forEach(row => {
-        const descrita = row['TURMA DESCRITA'];
+        const descrita = row['TURMA DESCRITA'] ? String(row['TURMA DESCRITA']).trim() : '';
         const disciplina = row['DISCIPLINA'] || 'A DEFINIR';
         const letra = row['TURMA'] || '';
         const professor = row['NOME SUPRIDO'] || 'A DEFINIR';
 
         if (descrita) {
-          const nomeCompleto = letra ? `${descrita.trim()} (Turma ${letra.trim()})` : descrita.trim();
+          const nomeCompleto = letra ? `${descrita} (Turma ${String(letra).trim()})` : descrita;
           const turmaId = mapaTurmas[nomeCompleto];
 
           if (turmaId) {
@@ -93,7 +101,7 @@ db.serialize(() => {
       });
 
       stmtGrade.finalize(() => {
-        console.log('🎉 Banco de dados SQLite populado com SUCESSO absoluto!');
+        console.log('🎉 Banco reorganizado com colunas separadas para Turno, Ensino e Módulo!');
         db.close();
       });
     });

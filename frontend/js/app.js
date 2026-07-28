@@ -1,85 +1,108 @@
+let listaCompletaTurmas = [];
+
 document.addEventListener('DOMContentLoaded', () => {
-  iniciar();
+  iniciarSistema();
 });
 
-async function iniciar() {
-  const select = document.querySelector('select') || document.getElementById('select-turma');
-  if (!select) return;
+async function iniciarSistema() {
+  const selectTurno = document.getElementById('filtro-turno');
+  const selectEnsino = document.getElementById('filtro-ensino');
+  const selectTurma = document.getElementById('select-turma');
 
   try {
-    const res = await fetch('/api/turmas');
-    const turmas = await res.json();
+    // 1. Busca lista completa do banco
+    const response = await fetch('/api/turmas');
+    listaCompletaTurmas = await response.json();
 
-    select.innerHTML = '<option value="">Selecione uma Turma / Módulo</option>';
+    // 2. Popula o select de turmas inicialmente
+    filtrarEAtualizarTurmas();
 
-    if (turmas.length === 0) {
-      select.innerHTML = '<option value="">Nenhuma turma cadastrada no banco</option>';
-      return;
-    }
+    // 3. Adiciona os ouvintes nos seletores
+    selectTurno.addEventListener('change', filtrarEAtualizarTurmas);
+    selectEnsino.addEventListener('change', filtrarEAtualizarTurmas);
 
-    turmas.forEach(t => {
-      const opt = document.createElement('option');
-      opt.value = t.id;
-      // Exibe o nome real importado da planilha (ex: "1º Módulo", "CEEBJA - Etapa 1")
-      opt.textContent = t.nome || t.nome_turma || `Turma ${t.id}`;
-      select.appendChild(opt);
-    });
-
-    select.addEventListener('change', (e) => {
-      const id = e.target.value;
-      if (id) {
-        carregarGrade(id);
+    // 4. Carrega a grade ao selecionar a turma
+    selectTurma.addEventListener('change', (e) => {
+      const turmaId = e.target.value;
+      if (turmaId) {
+        carregarGrade(turmaId);
       } else {
-        limparGrade();
+        document.getElementById('grade-container').innerHTML = `
+          <p class="aviso">Selecione uma turma no filtro acima para visualizar os professores e matérias.</p>
+        `;
       }
     });
 
   } catch (err) {
     console.error('Erro ao carregar turmas:', err);
+    selectTurma.innerHTML = '<option value="">Erro ao carregar dados do servidor</option>';
   }
 }
 
-async function carregarGrade(turmaId) {
-  let container = document.getElementById('grade-container') || document.getElementById('resultado') || document.querySelector('.grade-horaria');
+function filtrarEAtualizarTurmas() {
+  const turnoSel = document.getElementById('filtro-turno').value;
+  const ensinoSel = document.getElementById('filtro-ensino').value;
+  const selectTurma = document.getElementById('select-turma');
 
-  if (!container) {
-    container = document.createElement('div');
-    container.id = 'grade-container';
-    document.body.appendChild(container);
+  selectTurma.innerHTML = '<option value="">Selecione uma Turma</option>';
+
+  // Filtro de array em memória
+  const turmasFiltradas = listaCompletaTurmas.filter(turma => {
+    const bateTurno = !turnoSel || 
+      (turma.turno && turma.turno === turnoSel) || 
+      turma.nome.toUpperCase().includes(turnoSel);
+
+    const bateEnsino = !ensinoSel || 
+      (turma.ensino && turma.ensino === ensinoSel) || 
+      turma.nome.toUpperCase().includes(ensinoSel);
+
+    return bateTurno && bateEnsino;
+  });
+
+  if (turmasFiltradas.length === 0) {
+    selectTurma.innerHTML = '<option value="">Nenhuma turma encontrada com esses filtros</option>';
+    return;
   }
 
-  container.innerHTML = '<p style="padding: 10px;">Carregando professores e matérias...</p>';
+  turmasFiltradas.forEach(turma => {
+    const opt = document.createElement('option');
+    opt.value = turma.id;
+    opt.textContent = turma.nome;
+    selectTurma.appendChild(opt);
+  });
+}
+
+async function carregarGrade(turmaId) {
+  const container = document.getElementById('grade-container');
+  container.innerHTML = '<p>Carregando disciplinas e professores...</p>';
 
   try {
-    const res = await fetch(`/api/grade/${turmaId}`);
-    const dados = await res.json();
+    const response = await fetch(`/api/grade/${turmaId}`);
+    const dados = await response.json();
 
     if (!dados || dados.length === 0) {
-      container.innerHTML = '<p style="padding: 10px;">Nenhuma matéria/professor encontrado para este módulo.</p>';
+      container.innerHTML = '<p class="aviso">Nenhuma disciplina ou professor cadastrado para esta turma.</p>';
       return;
     }
 
     let html = `
-      <table border="1" style="width:100%; border-collapse: collapse; margin-top: 15px; text-align: left; font-family: sans-serif;">
+      <table>
         <thead>
-          <tr style="background-color: #004085; color: white;">
-            <th style="padding: 10px;">Dia da Semana</th>
-            <th style="padding: 10px;">Horário / Aula</th>
-            <th style="padding: 10px;">Matéria / Disciplina</th>
-            <th style="padding: 10px;">Professor(a)</th>
+          <tr>
+            <th>Disciplina / Matéria</th>
+            <th>Turma</th>
+            <th>Professor(a) Atribuído(a)</th>
           </tr>
         </thead>
         <tbody>
     `;
 
-    dados.forEach((row, idx) => {
-      const bg = idx % 2 === 0 ? '#ffffff' : '#f8f9fa';
+    dados.forEach(linha => {
       html += `
-        <tr style="background-color: ${bg};">
-          <td style="padding: 10px;">${row.dia_semana || '-'}</td>
-          <td style="padding: 10px;">${row.horario || '-'}</td>
-          <td style="padding: 10px; font-weight: bold;">${row.disciplina || '-'}</td>
-          <td style="padding: 10px;">${row.professor || '-'}</td>
+        <tr>
+          <td style="font-weight: bold;">${linha.disciplina || '-'}</td>
+          <td>${linha.turma_letra || '-'}</td>
+          <td>${linha.professor || 'A DEFINIR'}</td>
         </tr>
       `;
     });
@@ -88,12 +111,7 @@ async function carregarGrade(turmaId) {
     container.innerHTML = html;
 
   } catch (err) {
-    console.error('Erro ao carregar grade:', err);
-    container.innerHTML = '<p style="color: red; padding: 10px;">Erro ao carregar dados do banco.</p>';
+    console.error('Erro ao buscar a grade:', err);
+    container.innerHTML = '<p style="color: red;">Erro ao carregar os dados da grade horária.</p>';
   }
-}
-
-function limparGrade() {
-  const container = document.getElementById('grade-container') || document.getElementById('resultado') || document.querySelector('.grade-horaria');
-  if (container) container.innerHTML = '';
 }

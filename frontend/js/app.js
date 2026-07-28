@@ -1,12 +1,46 @@
 /**
- * APP.JS - Gestão da Grade Horária (CEEBJA / EJA)
- * Arquitetura: Clean Code / Vanilla JS
+ * APP.JS - Gestão de Grade Horária (CEEBJA / EJA)
+ * Arquitetura: Clean Code / Vanilla JS / REST API
  * Desenvolvedor Full Stack Sênior & Master Data Analyst
  */
 
+// --- CONTROLE DE SESSÃO E LOGOUT AUTOMÁTICO ---
+(function verificarAutenticacao() {
+  const token = localStorage.getItem('token');
+  const usuarioRaw = localStorage.getItem('usuario');
+
+  // Se não houver token/sessão, redireciona imediatamente para o login
+  if (!token || !usuarioRaw) {
+    window.location.replace('/login.html');
+    return;
+  }
+
+  // Preenche dados do usuário logado no Header assim que o DOM carregar
+  document.addEventListener('DOMContentLoaded', () => {
+    try {
+      const usuario = JSON.parse(usuarioRaw);
+      const elNome = document.getElementById('nome-usuario-logado');
+      const elPerfil = document.getElementById('perfil-usuario-logado');
+
+      if (elNome) elNome.textContent = usuario.nome || usuario.usuario;
+      if (elPerfil) elPerfil.textContent = usuario.perfil || 'ADMINISTRADOR';
+    } catch (e) {
+      console.error('Erro ao ler dados da sessão:', e);
+    }
+  });
+})();
+
+// Função global para encerrar a sessão
+function fazerLogout() {
+  localStorage.removeItem('token');
+  localStorage.removeItem('usuario');
+  window.location.replace('/login.html');
+}
+
+// --- CONFIGURAÇÃO GLOBAL E CONSTANTES ---
 const DIAS_SEMANA = ['SEGUNDA', 'TERÇA', 'QUARTA', 'QUINTA', 'SEXTA'];
 
-// Horários por Turno da EJA / CEEBJA (Início da Tarde às 13:30)
+// Horários por Turno (Tarde iniciando exatamente às 13:30)
 const HORARIOS_TURNO = {
   MANHA: [
     { num: 1, rotulo: '1ª AULA', inicio: '07:50', fim: '08:40' },
@@ -57,7 +91,7 @@ async function inicializarSistema() {
 
     select.innerHTML = '<option value="">-- SELECIONE A TURMA --</option>';
 
-    // --- GRUPOS E HIERARQUIA DIDÁTICA DO SELETOR ---
+    // --- REGRAS DE HIERARQUIA E GRUPOS DO SELECT ---
     const categorias = [
       { chave: 'MANHA_FUND', label: '📍 MANHÃ — ENSINO FUNDAMENTAL', filtro: t => ehTurno(t, 'MANHA') && ehNivel(t, 'FUNDAMENTAL') },
       { chave: 'MANHA_MEDIO', label: '📍 MANHÃ — ENSINO MÉDIO', filtro: t => ehTurno(t, 'MANHA') && ehNivel(t, 'MEDIO') },
@@ -71,7 +105,7 @@ async function inicializarSistema() {
     categorias.forEach(cat => {
       const listaGrupo = turmas.filter(cat.filtro);
       if (listaGrupo.length > 0) {
-        // Ordena numericamente os módulos (1º, 2º, 3º...)
+        // Ordenação por módulo numérico (1º, 2º, 3º...)
         listaGrupo.sort((a, b) => (a.nome_descricao || '').localeCompare(b.nome_descricao || '', undefined, { numeric: true }));
 
         const group = document.createElement('optgroup');
@@ -100,16 +134,16 @@ async function inicializarSistema() {
       }
     });
 
-    // Quadro padrão inicial (Manhã)
+    // Quadro inicial padrão (Manhã)
     renderizarEstruturaQuadro({ nome_descricao: 'MANHÃ' });
 
   } catch (err) {
-    console.error('Erro ao inicializar seletor de turmas:', err);
+    console.error('Erro ao inicializar seletor:', err);
     select.innerHTML = '<option value="">Erro ao carregar turmas</option>';
   }
 }
 
-// Funções de classificação
+// Funções auxiliares de classificação
 function ehSemipresencial(t) {
   const desc = (t.nome_descricao || '').toUpperCase();
   return desc.includes('SEMIPRESENCIAL') || desc.includes('SEMI') || /\b\d{1,2}\b/.test(desc);
@@ -155,7 +189,7 @@ function renderizarEstruturaQuadro(turma) {
       `;
     } else {
       const tdHorario = document.createElement('td');
-      tdHorario.className = 'p-2 bg-slate-50 font-bold border border-slate-200 text-slate-700 w-24 text-center';
+      tdHorario.className = 'p-2 bg-slate-50 font-bold border border-slate-200 text-slate-700 w-28 text-center';
       tdHorario.innerHTML = `
         <div class="text-xs text-slate-800 font-bold">${item.rotulo}</div>
         <div class="text-[10px] text-slate-500 font-normal mt-0.5">${item.inicio} - ${item.fim}</div>
@@ -224,7 +258,7 @@ function renderizarCardsDisponiveis() {
     const profNome = item.professor_nome || 'A DEFINIR';
     const semProf = profNome === 'A DEFINIR';
 
-    // --- CRIAÇÃO DOS BADGES E CORES ---
+    // --- ESTILIZAÇÃO E BADGES DAS CARDS ---
     let bgBorderClass = 'bg-white border-slate-200';
     let badgeHtml = '';
     let iconProf = semProf ? '⚠️' : '👤';

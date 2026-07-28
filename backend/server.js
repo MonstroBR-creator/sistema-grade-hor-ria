@@ -11,29 +11,22 @@ const PORT = process.env.PORT || 10000;
 app.use(cors());
 app.use(express.json());
 
-// --- MAPEAMENTO INTELIGENTE DA PASTA DO FRONTEND ---
-// Procura o index.html nos locais mais comuns de um projeto Node.js
+// --- MAPEAMENTO ESTRUTURAL DO FRONTEND ---
 const possiveisCaminhos = [
-  path.join(__dirname, '..', 'public'), // Raiz/public
-  path.join(__dirname, '..'),           // Raiz do projeto (se o index.html estiver solto lá)
-  path.join(__dirname, 'public'),      // backend/public
-  path.join(__dirname, '..', 'frontend') // Raiz/frontend
+  path.join(__dirname, '..', 'public'),
+  path.join(__dirname, '..'),
+  path.join(__dirname, 'public'),
+  path.join(__dirname, '..', 'frontend')
 ];
 
 let staticPath = possiveisCaminhos.find(caminho => {
-  const indexExiste = fs.existsSync(path.join(caminho, 'index.html'));
-  if (indexExiste) {
-    console.log(`✅ Front-end encontrado em: ${caminho}`);
-  }
-  return indexExiste;
-}) || path.join(__dirname, '..'); // Fallback para a raiz se não encontrar
+  return fs.existsSync(path.join(caminho, 'index.html'));
+}) || path.join(__dirname, '..');
 
-console.log('Servindo arquivos estáticos de:', staticPath);
 app.use(express.static(staticPath));
 
-// --- CONEXÃO BANCO DE DADOS SQLITE ---
+// --- BANCO DE DADOS SQLITE ---
 const dbPath = path.join(__dirname, 'database', 'grade_horaria.db');
-console.log('Conectando ao banco SQLite em:', dbPath);
 
 const db = new sqlite3.Database(dbPath, (err) => {
   if (err) {
@@ -49,6 +42,7 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', database: dbPath, staticDir: staticPath });
 });
 
+// Rota de Turmas
 app.get('/api/turmas', (req, res) => {
   const query = 'SELECT * FROM turmas';
   db.all(query, [], (err, rows) => {
@@ -60,6 +54,7 @@ app.get('/api/turmas', (req, res) => {
   });
 });
 
+// Rota de Disciplinas
 app.get('/api/disciplinas', (req, res) => {
   const query = 'SELECT * FROM disciplinas';
   db.all(query, [], (err, rows) => {
@@ -71,33 +66,52 @@ app.get('/api/disciplinas', (req, res) => {
   });
 });
 
+// Rota de Grade Completa por Turma (Cruzando dados de Horários, Matérias e Professores)
 app.get('/api/grade/:turmaId', (req, res) => {
   const { turmaId } = req.params;
-  const query = 'SELECT * FROM grade_horaria WHERE turma_id = ?';
-  db.all(query, [turmaId], (err, rows) => {
+  
+  // Tenta realizar a busca relacional completa. Caso a estrutura use colunas diretas, o fallback trata.
+  const queryRelacional = `
+    SELECT 
+      g.id,
+      g.dia_semana,
+      g.horario,
+      COALESCE(d.nome, g.disciplina, 'Disciplina não informada') AS disciplina,
+      COALESCE(p.nome, g.professor, 'Professor não atribuído') AS professor
+    FROM grade_horaria g
+    LEFT JOIN disciplinas d ON g.disciplina_id = d.id
+    LEFT JOIN professores p ON g.professor_id = p.id
+    WHERE g.turma_id = ?
+    ORDER BY g.dia_semana, g.horario
+  `;
+
+  db.all(queryRelacional, [turmaId], (err, rows) => {
     if (err) {
-      console.error('Erro ao buscar grade:', err.message);
-      return res.status(500).json({ error: 'Erro ao consultar a grade.' });
+      // Fallback para tabelas com estrutura simplificada/direta
+      const querySimples = 'SELECT * FROM grade_horaria WHERE turma_id = ?';
+      db.all(querySimples, [turmaId], (errSimple, rowsSimple) => {
+        if (errSimple) {
+          console.error('Erro ao buscar grade:', errSimple.message);
+          return res.status(500).json({ error: 'Erro ao consultar a grade horária.' });
+        }
+        return res.json(rowsSimple);
+      });
+    } else {
+      res.json(rows);
     }
-    res.json(rows);
   });
 });
 
-// Rota Coringa para servir o index.html principal
+// Servir o index.html principal
 app.get('*', (req, res) => {
   const indexPath = path.join(staticPath, 'index.html');
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
   } else {
-    res.status(404).send(`
-      <h2>Erro 404 - Front-end não encontrado</h2>
-      <p>O servidor está online, mas não encontrou o arquivo <b>index.html</b> nos diretórios mapeados.</p>
-      <p>Diretório verificado: <code>${staticPath}</code></p>
-    `);
+    res.status(404).send('Arquivo index.html não foi encontrado.');
   }
 });
 
-// Inicialização do Servidor
 app.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
 });

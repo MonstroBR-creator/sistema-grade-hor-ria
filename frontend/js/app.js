@@ -1,5 +1,6 @@
 /**
  * APP.JS - Gestão da Grade Horária
+ * Projeto: CEEBJA / EJA - Paraná
  * Compatível com schema.sql v1.2 (alocacoes, turmas, grade_horaria)
  */
 
@@ -8,7 +9,7 @@ const NUM_AULAS = [1, 2, 3, 4, 5];
 
 let turmaSelecionadaId = null;
 let alocacoesTurma = [];
-let gradeAlocada = {}; // "DIA_SEMANA-NUM_AULA" -> alocacao_id
+let gradeAlocada = {}; // Chave: "DIA_SEMANA-NUM_AULA" -> Valor: alocacao_id
 let todasAsGradesGlobal = [];
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -17,7 +18,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function inicializarSistema() {
   const select = document.getElementById('select-turma-unica');
-  renderizarEstruturaQuadro();
+  if (typeof renderizarEstruturaQuadro === 'function') {
+    renderizarEstruturaQuadro();
+  }
 
   try {
     const res = await fetch('/api/turmas');
@@ -30,28 +33,82 @@ async function inicializarSistema() {
 
     select.innerHTML = '<option value="">-- SELECIONE A TURMA / MÓDULO --</option>';
 
-    // Agrupamento limpo dentro do mesmo seletor
-    const manha = turmas.filter(t => (t.nome_descricao || '').toUpperCase().includes('MANHÃ'));
-    const noite = turmas.filter(t => (t.nome_descricao || '').toUpperCase().includes('NOITE'));
-    const outros = turmas.filter(t => !manha.includes(t) && !noite.includes(t));
+    // --- REGRAS DE NEGÓCIO EJA / CEEBJA PARANÁ ---
 
-    const adicionarGrupo = (label, lista) => {
+    // Identifica Semipresencial por número isolado (ex: 01, 02) ou palavra SEMI
+    const ehSemipresencial = t => {
+      const desc = (t.nome_descricao || '').toUpperCase();
+      return desc.includes('SEMI') || /\b\d{1,2}\b/.test(desc);
+    };
+
+    const ehManha = t => {
+      const desc = (t.nome_descricao || '').toUpperCase();
+      const codigo = (t.turno_codigo || '').toUpperCase();
+      if (ehSemipresencial(t)) return false; // Semipresencial vai direto para a Noite
+      return desc.includes('MANHÃ') || desc.includes('MANHA') || codigo === 'A';
+    };
+
+    const ehTarde = t => {
+      const desc = (t.nome_descricao || '').toUpperCase();
+      const codigo = (t.turno_codigo || '').toUpperCase();
+      if (ehSemipresencial(t)) return false;
+      return desc.includes('TARDE') || codigo === 'B';
+    };
+
+    const ehNoite = t => {
+      const desc = (t.nome_descricao || '').toUpperCase();
+      const codigo = (t.turno_codigo || '').toUpperCase();
+      // Turmas com número (Semipresencial) entram obrigatoriamente no bloco da Noite
+      return ehSemipresencial(t) || desc.includes('NOITE') || codigo === 'C';
+    };
+
+    // Ordenação pedagógica: Fundamental primeiro, Médio depois
+    const ordenarPorNivel = (lista) => {
+      return lista.sort((a, b) => {
+        const descA = (a.nome_descricao || '').toUpperCase();
+        const descB = (b.nome_descricao || '').toUpperCase();
+
+        const ehFundA = descA.includes('FUNDAMENTAL') || descA.includes('FUND');
+        const ehFundB = descB.includes('FUNDAMENTAL') || descB.includes('FUND');
+
+        if (ehFundA && !ehFundB) return -1; // Fundamental no topo
+        if (!ehFundA && ehFundB) return 1;  // Médio logo abaixo
+        return descA.localeCompare(descB);  // Ordenação alfabética secundária
+      });
+    };
+
+    // Separação e ordenação dos blocos de turmas
+    const manhaOrdenado = ordenarPorNivel(turmas.filter(ehManha));
+    const tardeOrdenado = ordenarPorNivel(turmas.filter(ehTarde));
+    const noiteOrdenado = ordenarPorNivel(turmas.filter(ehNoite));
+
+    const outros = turmas.filter(t => !ehManha(t) && !ehTarde(t) && !ehNoite(t));
+    const outrosOrdenado = ordenarPorNivel(outros);
+
+    // Construtor das categorias no HTML (<optgroup>)
+    const adicionarGrupoAoSelect = (label, lista) => {
       if (lista.length === 0) return;
       const group = document.createElement('optgroup');
       group.label = `--- ${label} ---`;
+
       lista.forEach(t => {
         const opt = document.createElement('option');
         opt.value = t.id;
-        opt.textContent = `${t.nome_descricao} [${t.turno_nome || 'GERAL'}]`;
+        const tagSemi = ehSemipresencial(t) ? ' (SEMIPRESENCIAL)' : '';
+        opt.textContent = `${t.nome_descricao}${tagSemi}`;
         group.appendChild(opt);
       });
+
       select.appendChild(group);
     };
 
-    adicionarGrupo('TURNO: MANHÃ', manha);
-    adicionarGrupo('TURNO: NOITE', noite);
-    adicionarGrupo('OUTROS / MÓDULOS', outros);
+    // Renderização dos grupos ordenados
+    adicionarGrupoAoSelect('TURNO: MANHÃ (PRESENCIAL)', manhaOrdenado);
+    adicionarGrupoAoSelect('TURNO: TARDE (PRESENCIAL)', tardeOrdenado);
+    adicionarGrupoAoSelect('TURNO: NOITE (PRESENCIAL & SEMIPRESENCIAL)', noiteOrdenado);
+    adicionarGrupoAoSelect('OUTRAS TURMAS', outrosOrdenado);
 
+    // Evento ao trocar de turma no filtro
     select.addEventListener('change', (e) => {
       turmaSelecionadaId = e.target.value;
       if (turmaSelecionadaId) {
@@ -87,8 +144,13 @@ function renderizarEstruturaQuadro() {
       tdSlot.dataset.dia = dia;
       tdSlot.dataset.aula = numAula;
 
-      tdSlot.addEventListener('dragover', e => { e.preventDefault(); tdSlot.classList.add('bg-blue-100'); });
-      tdSlot.addEventListener('dragleave', () => tdSlot.classList.remove('bg-blue-100'));
+      tdSlot.addEventListener('dragover', e => { 
+        e.preventDefault(); 
+        tdSlot.classList.add('bg-blue-100'); 
+      });
+      tdSlot.addEventListener('dragleave', () => {
+        tdSlot.classList.remove('bg-blue-100');
+      });
       tdSlot.addEventListener('drop', e => tratarDropAula(e, dia, numAula));
 
       tr.appendChild(tdSlot);
@@ -101,7 +163,7 @@ function renderizarEstruturaQuadro() {
 async function carregarDadosTurma(turmaId) {
   try {
     // 1. Busca alocações (cards de matérias/professores da turma)
-    const resAloc = await fetch(`/api/alocacoes`);
+    const resAloc = await fetch('/api/alocacoes');
     const todasAlocacoes = await resAloc.json();
     alocacoesTurma = todasAlocacoes.filter(a => String(a.turma_id) === String(turmaId));
 
@@ -269,8 +331,12 @@ function verificarConflitosGerais() {
 
 function limparTelas() {
   const container = document.getElementById('container-cards-disponiveis');
-  if (container) container.innerHTML = '<p class="text-xs text-slate-400 italic text-center py-4">Selecione uma turma no filtro.</p>';
+  if (container) {
+    container.innerHTML = '<p class="text-xs text-slate-400 italic text-center py-4">Selecione uma turma no filtro.</p>';
+  }
   renderizarEstruturaQuadro();
   const alerta = document.getElementById('painel-alerta');
-  if (alerta) alerta.classList.add('hidden');
+  if (alerta) {
+    alerta.classList.add('hidden');
+  }
 }

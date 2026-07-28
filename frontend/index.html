@@ -3,102 +3,33 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Grade Horária e Professores</title>
-  <style>
-    * {
-      box-sizing: border-box;
-      font-family: Arial, Helvetica, sans-serif;
-    }
-    body {
-      background-color: #f4f6f9;
-      margin: 0;
-      padding: 30px 15px;
-      color: #333;
-    }
-    .container {
-      max-width: 900px;
-      margin: 0 auto;
-      background: #ffffff;
-      padding: 25px;
-      border-radius: 8px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-    }
-    h1 {
-      color: #004085;
-      font-size: 22px;
-      margin-top: 0;
-      margin-bottom: 20px;
-      border-bottom: 2px solid #004085;
-      padding-bottom: 10px;
-    }
-    .form-group {
-      margin-bottom: 25px;
-    }
-    label {
-      display: block;
-      font-weight: bold;
-      margin-bottom: 8px;
-      color: #495057;
-    }
-    select {
-      width: 100%;
-      padding: 12px;
-      font-size: 15px;
-      border: 1px solid #ced4da;
-      border-radius: 5px;
-      background-color: #fff;
-      outline: none;
-      cursor: pointer;
-    }
-    select:focus {
-      border-color: #80bdff;
-      box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25);
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 15px;
-    }
-    th, td {
-      padding: 12px;
-      border: 1px solid #dee2e6;
-      text-align: left;
-    }
-    th {
-      background-color: #004085;
-      color: white;
-    }
-    tr:nth-child(even) {
-      background-color: #f8f9fa;
-    }
-    .mensagem-status {
-      text-align: center;
-      padding: 20px;
-      color: #6c757d;
-      background-color: #e9ecef;
-      border-radius: 5px;
-    }
-  </style>
+  <title>Sistema de Grade Horária — CEEBJA</title>
+  <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body>
+<body class="bg-slate-50 min-h-screen p-6">
 
-  <div class="container">
-    <h1>Grade Horária - Quadro de Professores</h1>
+  <div class="max-w-4xl mx-auto bg-white rounded-xl shadow-md border border-slate-200 p-6">
+    <div class="border-b border-slate-200 pb-4 mb-6">
+      <h1 class="text-2xl font-bold text-slate-800">Grade Horária e Quadro de Professores</h1>
+      <p class="text-sm text-slate-500">CEEBJA / EJA — Consulta de Disciplinas e Alocações</p>
+    </div>
 
     <!-- Único Seletor Limpo -->
-    <div class="form-group">
-      <label for="select-turma">Selecione a Turma / Módulo:</label>
-      <select id="select-turma">
+    <div class="mb-6">
+      <label for="select-turma" class="block text-sm font-bold text-slate-700 mb-2">Selecione a Turma / Módulo:</label>
+      <select id="select-turma" class="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none">
         <option value="">Carregando turmas...</option>
       </select>
     </div>
 
     <!-- Tabela Resultado -->
     <div id="resultado">
-      <div class="mensagem-status">Selecione uma turma no campo acima para visualizar as disciplinas e professores.</div>
+      <div class="p-6 text-center text-slate-500 bg-slate-50 rounded-lg border border-dashed border-slate-300 text-sm">
+        Selecione uma turma no campo acima para visualizar as disciplinas e professores.
+      </div>
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <script src="js/app.js"></script>
 </body>
 </html>

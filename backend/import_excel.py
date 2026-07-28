@@ -3,129 +3,97 @@ import sqlite3
 import pandas as pd
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-EXCEL_PATH = os.path.join(BASE_DIR, "data", "professores.xlsx")
-DB_PATH = os.path.join(BASE_DIR, "database", "grade_horaria.db")
-SCHEMA_PATH = os.path.join(BASE_DIR, "database", "schema.sql")
-
+EXCEL_PATH = os.path.join(BASE_DIR, 'data', 'professores.xlsx')
+DB_PATH = os.path.join(BASE_DIR, 'database', 'grade_horaria.db')
+SCHEMA_PATH = os.path.join(BASE_DIR, 'database', 'schema.sql')
 
 def inicializar_banco():
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+
+    # Força a remoção do banco antigo se o schema for incompatível
     if os.path.exists(DB_PATH):
         try:
             os.remove(DB_PATH)
-            print("🧹 Banco antigo removido para recriação limpa do schema.")
+            print("🗑️ Banco de dados antigo removido para recriação limpa com o schema.sql.")
         except Exception as e:
-            print(f"⚠️ Erro ao remover banco antigo: {e}")
+            print(f"⚠️ Não foi possível deletar o arquivo do banco diretamente: {e}")
 
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
-        cursor.executescript(f.read())
+    
+    # Ativa foreign keys e executa a criação das tabelas do schema v1.2
+    cursor.execute("PRAGMA foreign_keys = ON;")
+    if os.path.exists(SCHEMA_PATH):
+        with open(SCHEMA_PATH, 'r', encoding='utf-8') as f:
+            cursor.executescript(f.read())
+    else:
+        print(f"❌ Erro: Arquivo de schema não encontrado em {SCHEMA_PATH}")
+
     conn.commit()
     conn.close()
 
-
-def mapear_turno_id(codigo_turma):
-    cod = str(codigo_turma).strip().upper()
-    if cod == "A":
-        return 1
-    elif cod == "B":
-        return 2
-    return 3
-
-
 def importar_dados():
     if not os.path.exists(EXCEL_PATH):
-        print(f"❌ Planilha não encontrada em: {EXCEL_PATH}")
+        print(f"❌ Arquivo {EXCEL_PATH} não encontrado.")
         return
 
     inicializar_banco()
+    df = pd.read_excel(EXCEL_PATH)
 
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    # Injeta professor neutro 'A DEFINIR'
-    cursor.execute("INSERT OR IGNORE INTO professores (id, nome) VALUES (1, 'A DEFINIR')")
+    # Garante o PRAGMA para relacionamentos
+    cursor.execute("PRAGMA foreign_keys = ON;")
 
-    df = pd.read_excel(EXCEL_PATH)
-    df.columns = df.columns.astype(str).str.strip().str.upper()
+    # Mapeamento do Turno (A=Manhã, B=Tarde, C=Noite)
+    cursor.execute("SELECT id, codigo FROM turnos")
+    turnos_map = {codigo: tid for tid, codigo in cursor.fetchall()}
 
-    col_turma_desc = [c for c in df.columns if "TURMA" in c and "DESCRITA" in c]
-    col_turma_codigo = [c for c in df.columns if c == "TURMA" or "TURMA (" in c or "TURMA_" in c]
-    col_disciplina = [c for c in df.columns if "DISCIPLINA" in c]
-    col_professor = [c for c in df.columns if "NOME" in c or "SUPRIDO" in c or "PROFESSOR" in c]
+    for _, row in df.iterrows():
+        descrita = str(row.get('TURMA DESCRITA', '')).strip()
+        disciplina = str(row.get('DISCIPLINA', '')).strip()
+        turma_letra = str(row.get('TURMA', 'A')).strip().upper()
+        professor = str(row.get('NOME SUPRIDO', 'A DEFINIR')).strip()
 
-    col_desc = col_turma_desc[0] if col_turma_desc else df.columns[0]
-    col_disc = col_disciplina[0] if col_disciplina else df.columns[1]
-    col_cod = col_turma_codigo[0] if col_turma_codigo else [c for c in df.columns if c != col_desc and c != col_disc][0]
-    col_prof = col_professor[0] if col_professor else df.columns[-1]
-
-    print("⏳ Processando registros e gerando alocações...")
-
-    total_criados = 0
-
-    for idx, row in df.iterrows():
-        val_desc = row[col_desc]
-        val_disc = row[col_disc]
-        val_cod = row[col_cod]
-        val_prof = row[col_prof]
-
-        if pd.isna(val_desc) or pd.isna(val_disc):
+        if not descrita or descrita.lower() == 'nan':
             continue
 
-        turma_desc = str(val_desc).strip()
-        disciplina_nome = str(val_disc).strip()
-        codigo_turma = str(val_cod).strip()
-        prof_raw = str(val_prof).strip() if not pd.isna(val_prof) else ""
+        nome_turma_completa = f"{descrita} (Turma {turma_letra})" if turma_letra and turma_letra != 'NAN' else descrita
+        
+        # Identifica Turno
+        turno_id = turnos_map.get('A', 1)
+        if 'NOITE' in descrita.upper():
+            turno_id = turnos_map.get('C', 3)
+        elif 'TARDE' in descrita.upper():
+            turno_id = turnos_map.get('B', 2)
 
-        if prof_raw == "" or prof_raw.upper() in ["NAN", "NONE", "NULL", "A DEFINIR"]:
-            prof_nome = "A DEFINIR"
-        else:
-            prof_nome = prof_raw
-
-        turno_id = mapear_turno_id(codigo_turma)
-
-        # 1. Turma
-        cursor.execute("INSERT OR IGNORE INTO turmas (nome_descricao, turno_id) VALUES (?, ?)", (turma_desc, turno_id))
-        cursor.execute("SELECT id FROM turmas WHERE nome_descricao = ?", (turma_desc,))
+        # 1. Turmas
+        cursor.execute("INSERT OR IGNORE INTO turmas (nome_descricao, turno_id) VALUES (?, ?)", (nome_turma_completa, turno_id))
+        cursor.execute("SELECT id FROM turmas WHERE nome_descricao = ?", (nome_turma_completa,))
         turma_id = cursor.fetchone()[0]
 
-        # 2. Disciplina
-        cursor.execute("INSERT OR IGNORE INTO disciplinas (nome) VALUES (?)", (disciplina_nome,))
-        cursor.execute("SELECT id FROM disciplinas WHERE nome = ?", (disciplina_nome,))
+        # 2. Disciplinas
+        cursor.execute("INSERT OR IGNORE INTO disciplinas (nome) VALUES (?)", (disciplina,))
+        cursor.execute("SELECT id FROM disciplinas WHERE nome = ?", (disciplina,))
         disciplina_id = cursor.fetchone()[0]
 
-        # 3. Professor
-        if prof_nome == "A DEFINIR":
-            prof_id = 1
-        else:
-            cursor.execute("INSERT OR IGNORE INTO professores (nome) VALUES (?)", (prof_nome,))
-            cursor.execute("SELECT id FROM professores WHERE nome = ?", (prof_nome,))
+        # 3. Professores
+        prof_id = None
+        if professor and professor.upper() != 'A DEFINIR' and professor.lower() != 'nan':
+            cursor.execute("INSERT OR IGNORE INTO professores (nome) VALUES (?)", (professor,))
+            cursor.execute("SELECT id FROM professores WHERE nome = ?", (professor,))
             prof_id = cursor.fetchone()[0]
 
-        # 4. Alocação Presencial Normal
+        # 4. Alocações
         cursor.execute("""
             INSERT INTO alocacoes (turma_id, disciplina_id, professor_id, tipo)
             VALUES (?, ?, ?, 'PRESENCIAL')
         """, (turma_id, disciplina_id, prof_id))
-        total_criados += 1
-
-        # 5. Se a turma for SEMIPRESENCIAL, cria opções virtuais
-        if "SEMIPRESENCIAL" in turma_desc.upper():
-            cursor.execute("""
-                INSERT INTO alocacoes (turma_id, disciplina_id, professor_id, tipo)
-                VALUES (?, ?, ?, 'SISTEMA')
-            """, (turma_id, disciplina_id, prof_id))
-
-            cursor.execute("""
-                INSERT INTO alocacoes (turma_id, disciplina_id, professor_id, tipo)
-                VALUES (?, ?, ?, 'TUTORIA')
-            """, (turma_id, disciplina_id, prof_id))
-            total_criados += 2
 
     conn.commit()
     conn.close()
-    print(f"✅ ETL Concluído! {total_criados} alocações gravadas no SQLite.")
+    print("✅ Carga do professores.xlsx concluída com sucesso no schema relacional v1.2!")
 
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     importar_dados()

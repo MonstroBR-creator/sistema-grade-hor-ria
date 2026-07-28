@@ -1,6 +1,5 @@
 /**
  * SERVER.JS - API REST Express / SQLite e Servidor Estático
- * Arquitetura: Clean Code / REST API
  * Desenvolvido por Monstro Tecnologias
  */
 
@@ -19,21 +18,18 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Servidor de arquivos estáticos da pasta frontend
 const FRONTEND_PATH = path.join(__dirname, '..', 'frontend');
 app.use(express.static(FRONTEND_PATH));
 
-// Conexão com o Banco SQLite
 const DB_PATH = path.join(__dirname, 'database', 'grade_horaria.db');
 
-// Garante que o diretório database exista
 if (!fs.existsSync(path.join(__dirname, 'database'))) {
   fs.mkdirSync(path.join(__dirname, 'database'), { recursive: true });
 }
 
 const db = new sqlite3.Database(DB_PATH, (err) => {
   if (err) {
-    console.error('❌ Erro ao conectar no SQLite:', err.message);
+    console.error('❌ Erro SQLite:', err.message);
   } else {
     console.log('⚡ Conectado ao banco SQLite em:', DB_PATH);
     garantirTabelaUsuarios();
@@ -43,23 +39,34 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
 db.run('PRAGMA foreign_keys = ON;');
 
 /**
- * Garante a criação da tabela de usuários se ela ainda não existir no banco
+ * MIGRATION AUTOMÁTICA: Garante tabela e adciona coluna se faltar
  */
 function garantirTabelaUsuarios() {
-  const sql = `
+  const sqlCreate = `
     CREATE TABLE IF NOT EXISTS usuarios (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       nome TEXT NOT NULL,
       usuario TEXT UNIQUE NOT NULL,
       cpf TEXT UNIQUE,
       senha_hash TEXT NOT NULL,
-      perfil TEXT DEFAULT 'USUARIO',
-      criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
+      perfil TEXT DEFAULT 'USUARIO'
     );
   `;
-  db.run(sql, (err) => {
-    if (err) console.error('⚠️ Erro ao validar tabela usuarios:', err.message);
-    else console.log('✅ Tabela "usuarios" pronta para uso.');
+  
+  db.run(sqlCreate, (err) => {
+    if (err) {
+      console.error('⚠️ Erro ao criar tabela usuarios:', err.message);
+    } else {
+      console.log('✅ Tabela "usuarios" validada.');
+      // Adiciona a coluna criado_em se ela não existir
+      db.run(`ALTER TABLE usuarios ADD COLUMN criado_em DATETIME DEFAULT CURRENT_TIMESTAMP`, (alterErr) => {
+        if (alterErr) {
+          // Se a coluna já existir, ele só ignora o erro silenciosamente
+        } else {
+          console.log('✨ Coluna "criado_em" adicionada via Migration!');
+        }
+      });
+    }
   });
 }
 
@@ -84,7 +91,7 @@ app.post('/api/login', (req, res) => {
   `;
   
   db.get(query, [termoLimpo, termoLimpo, cpfApenasNumeros], (err, usuario) => {
-    if (err) return res.status(500).json({ sucesso: false, mensagem: 'Erro interno no banco de dados.' });
+    if (err) return res.status(500).json({ sucesso: false, mensagem: 'Erro no banco.' });
 
     if (!usuario || usuario.senha_hash !== String(senha).trim()) {
       return res.status(401).json({ sucesso: false, mensagem: 'Usuário/CPF ou senha incorretos.' });
@@ -109,9 +116,9 @@ app.post('/api/login', (req, res) => {
    2. GESTÃO DE USUÁRIOS (CRUD)
    ========================================== */
 
-// Listar todos os usuários
+// Consulta limpa sem dependência estrita de criado_em
 app.get('/api/usuarios', (req, res) => {
-  const query = `SELECT id, nome, usuario, cpf, perfil, criado_em FROM usuarios ORDER BY id DESC`;
+  const query = `SELECT id, nome, usuario, cpf, perfil FROM usuarios ORDER BY id DESC`;
   db.all(query, [], (err, rows) => {
     if (err) {
       console.error('❌ Erro na consulta /api/usuarios:', err.message);
@@ -121,7 +128,6 @@ app.get('/api/usuarios', (req, res) => {
   });
 });
 
-// Cadastrar novo usuário
 app.post('/api/usuarios', (req, res) => {
   const { nome, usuario, cpf, senha_hash, perfil } = req.body;
 
@@ -139,9 +145,8 @@ app.post('/api/usuarios', (req, res) => {
 
   db.run(sql, [nome.trim(), userLimpo, cpfLimpo, senha_hash.trim(), perfil || 'USUARIO'], function(err) {
     if (err) {
-      console.error('❌ Erro ao inserir usuário:', err.message);
       if (err.message.includes('UNIQUE')) {
-        return res.status(400).json({ sucesso: false, mensagem: 'Nome de usuário ou CPF já cadastrado.' });
+        return res.status(400).json({ sucesso: false, mensagem: 'Usuário ou CPF já cadastrado.' });
       }
       return res.status(500).json({ sucesso: false, mensagem: err.message });
     }
@@ -149,22 +154,27 @@ app.post('/api/usuarios', (req, res) => {
   });
 });
 
-// Excluir usuário pelo ID
+// Excluir usuário (Protegendo admin)
 app.delete('/api/usuarios/:id', (req, res) => {
   const { id } = req.params;
 
-  const sql = `DELETE FROM usuarios WHERE id = ?`;
-  db.run(sql, [id], function(err) {
+  db.get(`SELECT usuario FROM usuarios WHERE id = ?`, [id], (err, u) => {
     if (err) return res.status(500).json({ sucesso: false, mensagem: err.message });
-    if (this.changes === 0) {
-      return res.status(404).json({ sucesso: false, mensagem: 'Usuário não encontrado.' });
+    if (!u) return res.status(404).json({ sucesso: false, mensagem: 'Usuário não encontrado.' });
+
+    if (u.usuario.toLowerCase() === 'admin') {
+      return res.status(403).json({ sucesso: false, mensagem: 'O usuário admin principal é protegido e não pode ser excluído.' });
     }
-    res.json({ sucesso: true, mensagem: 'Usuário excluído com sucesso!' });
+
+    db.run(`DELETE FROM usuarios WHERE id = ?`, [id], function(err) {
+      if (err) return res.status(500).json({ sucesso: false, mensagem: err.message });
+      res.json({ sucesso: true, mensagem: 'Usuário excluído com sucesso!' });
+    });
   });
 });
 
 /* ==========================================
-   3. CONSULTAS DA GRADE HORÁRIA E ALOCAÇÕES
+   3. GRADE HORÁRIA E ALOCAÇÕES
    ========================================== */
 
 app.get('/api/turmas', (req, res) => {
@@ -183,18 +193,6 @@ app.get('/api/alocacoes', (req, res) => {
     LEFT JOIN professores p ON a.professor_id = p.id
   `;
   db.all(query, [], (err, rows) => res.json(rows || []));
-});
-
-app.get('/api/alocacoes/:turmaId', (req, res) => {
-  const { turmaId } = req.params;
-  const query = `
-    SELECT a.id AS alocacao_id, a.turma_id, d.nome AS disciplina_nome, COALESCE(p.nome, 'A DEFINIR') AS professor_nome, a.tipo
-    FROM alocacoes a
-    LEFT JOIN disciplinas d ON a.disciplina_id = d.id
-    LEFT JOIN professores p ON a.professor_id = p.id
-    WHERE a.turma_id = ?
-  `;
-  db.all(query, [turmaId], (err, rows) => res.json(rows || []));
 });
 
 app.get('/api/grade', (req, res) => {
@@ -231,7 +229,7 @@ app.delete('/api/grade', (req, res) => {
 });
 
 /* ==========================================
-   4. ROTAS DE PÁGINAS E NAVEGAÇÃO
+   4. ROTAS DE PÁGINAS
    ========================================== */
 
 app.get('/login', (req, res) => res.sendFile(path.join(FRONTEND_PATH, 'login.html')));

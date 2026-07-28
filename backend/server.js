@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 10000;
 app.use(cors());
 app.use(express.json());
 
-// 1. Mapeamento estático
+// Mapeamento dinâmico da pasta estática do front-end
 const possiveisCaminhos = [
   path.join(__dirname, '..', 'public'),
   path.join(__dirname, '..'),
@@ -24,8 +24,9 @@ let staticPath = possiveisCaminhos.find(caminho => {
 
 app.use(express.static(staticPath));
 
-// 2. Conexão SQLite
+// Conexão com o Banco SQLite
 const dbPath = path.join(__dirname, 'database', 'grade_horaria.db');
+
 const db = new sqlite3.Database(dbPath, (err) => {
   if (err) {
     console.error('Erro ao conectar ao banco SQLite:', err.message);
@@ -34,45 +35,42 @@ const db = new sqlite3.Database(dbPath, (err) => {
   }
 });
 
-// 3. API - Rotas
+// --- ROTAS DA API ---
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', database: dbPath, staticDir: staticPath });
 });
 
-// Retorna todas as turmas
+// Rota de Turmas (Retorna ID e Nome Real ex: "1º Módulo", "2º Módulo A")
 app.get('/api/turmas', (req, res) => {
-  db.all('SELECT * FROM turmas', [], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
+  db.all('SELECT * FROM turmas ORDER BY nome', [], (err, rows) => {
+    if (err) {
+      return res.status(500).json({ error: 'Erro ao buscar turmas: ' + err.message });
+    }
     res.json(rows);
   });
 });
 
-// Retorna a grade genérica sem travar por erro de JOIN
+// Rota de Grade Completa da Turma Selecionada
 app.get('/api/grade/:turmaId', (req, res) => {
   const { turmaId } = req.params;
   
-  // Tenta buscar na tabela de grade_horaria
-  db.all('SELECT * FROM grade_horaria WHERE turma_id = ?', [turmaId], (err, rows) => {
+  const query = 'SELECT * FROM grade_horaria WHERE turma_id = ?';
+  db.all(query, [turmaId], (err, rows) => {
     if (err) {
-      // Se der erro de nome de coluna, tenta buscar direto sem filtro rígido
-      db.all('SELECT * FROM grade_horaria', [], (errAll, rowsAll) => {
-        if (errAll) return res.status(500).json({ error: errAll.message });
-        res.json(rowsAll);
-      });
-    } else {
-      res.json(rows);
+      return res.status(500).json({ error: 'Erro ao buscar grade: ' + err.message });
     }
+    res.json(rows);
   });
 });
 
-// Servidor estático index.html
+// Servir o index.html para qualquer outra rota
 app.get('*', (req, res) => {
   const indexPath = path.join(staticPath, 'index.html');
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
   } else {
-    res.status(404).send('index.html não encontrado.');
+    res.status(404).send('Arquivo index.html não foi encontrado.');
   }
 });
 

@@ -1,6 +1,7 @@
 /**
  * SERVER.JS - API REST Express / SQLite e Servidor Estático
- * Caminho: backend/server.js
+ * Arquitetura: Clean Code / REST API
+ * Desenvolvido por Monstro Tecnologias
  */
 
 const express = require('express');
@@ -11,7 +12,6 @@ const fs = require('fs');
 const jwt = require('jsonwebtoken');
 
 const app = express();
-// O Render injeta a porta em process.env.PORT; localmente usa a 3000
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = 'ceebja_chave_secreta_super_segura_2026';
 
@@ -19,20 +19,29 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Caminho absoluto para a pasta frontend
+// Servidor de arquivos estáticos da pasta frontend
 const FRONTEND_PATH = path.join(__dirname, '..', 'frontend');
 app.use(express.static(FRONTEND_PATH));
 
 // Conexão com o Banco SQLite
 const DB_PATH = path.join(__dirname, 'database', 'grade_horaria.db');
+
+// Garante que o diretório database exista
+if (!fs.existsSync(path.join(__dirname, 'database'))) {
+  fs.mkdirSync(path.join(__dirname, 'database'), { recursive: true });
+}
+
 const db = new sqlite3.Database(DB_PATH, (err) => {
-  if (err) console.error('❌ Erro SQLite:', err.message);
+  if (err) console.error('❌ Erro ao conectar no SQLite:', err.message);
   else console.log('⚡ Conectado ao banco SQLite em:', DB_PATH);
 });
 
 db.run('PRAGMA foreign_keys = ON;');
 
-/* API LOGIN */
+/* ==========================================
+   1. AUTENTICAÇÃO E LOGIN
+   ========================================== */
+
 app.post('/api/login', (req, res) => {
   const { identificador, senha } = req.body;
 
@@ -50,7 +59,7 @@ app.post('/api/login', (req, res) => {
   `;
   
   db.get(query, [termoLimpo, termoLimpo, cpfApenasNumeros], (err, usuario) => {
-    if (err) return res.status(500).json({ sucesso: false, mensagem: 'Erro interno no banco.' });
+    if (err) return res.status(500).json({ sucesso: false, mensagem: 'Erro interno no banco de dados.' });
 
     if (!usuario || usuario.senha_hash !== String(senha).trim()) {
       return res.status(401).json({ sucesso: false, mensagem: 'Usuário/CPF ou senha incorretos.' });
@@ -71,7 +80,64 @@ app.post('/api/login', (req, res) => {
   });
 });
 
-/* API REST GRADE */
+/* ==========================================
+   2. GESTÃO DE USUÁRIOS (CRUD)
+   ========================================== */
+
+// Listar todos os usuários
+app.get('/api/usuarios', (req, res) => {
+  const query = `SELECT id, nome, usuario, cpf, perfil, criado_em FROM usuarios ORDER BY id DESC`;
+  db.all(query, [], (err, rows) => {
+    if (err) return res.status(500).json({ sucesso: false, mensagem: err.message });
+    res.json(rows || []);
+  });
+});
+
+// Cadastrar novo usuário
+app.post('/api/usuarios', (req, res) => {
+  const { nome, usuario, cpf, senha_hash, perfil } = req.body;
+
+  if (!nome || !usuario || !senha_hash) {
+    return res.status(400).json({ sucesso: false, mensagem: 'Nome, usuário e senha são obrigatórios.' });
+  }
+
+  const userLimpo = String(usuario).trim().toLowerCase();
+  const cpfLimpo = cpf ? String(cpf).replace(/\D/g, '') : null;
+
+  const sql = `
+    INSERT INTO usuarios (nome, usuario, cpf, senha_hash, perfil)
+    VALUES (?, ?, ?, ?, ?)
+  `;
+
+  db.run(sql, [nome.trim(), userLimpo, cpfLimpo, senha_hash.trim(), perfil || 'USUARIO'], function(err) {
+    if (err) {
+      if (err.message.includes('UNIQUE')) {
+        return res.status(400).json({ sucesso: false, mensagem: 'Nome de usuário ou CPF já cadastrado.' });
+      }
+      return res.status(500).json({ sucesso: false, mensagem: err.message });
+    }
+    res.status(201).json({ sucesso: true, mensagem: 'Usuário cadastrado com sucesso!', id: this.lastID });
+  });
+});
+
+// Excluir usuário pelo ID
+app.delete('/api/usuarios/:id', (req, res) => {
+  const { id } = req.params;
+
+  const sql = `DELETE FROM usuarios WHERE id = ?`;
+  db.run(sql, [id], function(err) {
+    if (err) return res.status(500).json({ sucesso: false, mensagem: err.message });
+    if (this.changes === 0) {
+      return res.status(404).json({ sucesso: false, mensagem: 'Usuário não encontrado.' });
+    }
+    res.json({ sucesso: true, mensagem: 'Usuário excluído com sucesso!' });
+  });
+});
+
+/* ==========================================
+   3. CONSULTAS DA GRADE HORÁRIA E ALOCAÇÕES
+   ========================================== */
+
 app.get('/api/turmas', (req, res) => {
   const query = `
     SELECT t.id, t.nome_descricao, tu.codigo AS turno_codigo, tu.nome AS turno_nome 
@@ -135,8 +201,14 @@ app.delete('/api/grade', (req, res) => {
   });
 });
 
-// Rotas para as páginas HTML
+/* ==========================================
+   4. ROTAS DE PÁGINAS E NAVEGAÇÃO
+   ========================================== */
+
 app.get('/login', (req, res) => res.sendFile(path.join(FRONTEND_PATH, 'login.html')));
+app.get('/usuarios', (req, res) => res.sendFile(path.join(FRONTEND_PATH, 'usuarios.html')));
 app.get('/', (req, res) => res.sendFile(path.join(FRONTEND_PATH, 'index.html')));
 
-app.listen(PORT, () => console.log(`🚀 Servidor rodando em: http://localhost:${PORT}`));
+app.listen(PORT, () => {
+  console.log(`🚀 Servidor Monstro Tecnologias rodando em: http://localhost:${PORT}`);
+});

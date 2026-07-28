@@ -2,65 +2,72 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const sqlite3 = require('sqlite3').verbose();
+const fs = require('fs');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 
-// Middleware
+// Middlewares
 app.use(cors());
 app.use(express.json());
 
-// Servir arquivos estáticos do Frontend (ajuste o caminho se sua pasta estática for 'public' ou 'frontend')
-const publicPath = path.join(__dirname, '..', 'public');
-app.use(express.static(publicPath));
+// --- LOCALIZAÇÃO INTELIGENTE DOS ARQUIVOS DO FRONTEND ---
+// Tenta achar 'public' no diretório pai, no diretório atual ou serve a raiz do projeto
+let staticPath = path.join(__dirname, '..', 'public');
 
-// Garantir caminho absoluto e dinâmico para o SQLite no ambiente Linux do Render
+if (!fs.existsSync(staticPath)) {
+  staticPath = path.join(__dirname, 'public');
+}
+if (!fs.existsSync(staticPath)) {
+  staticPath = path.join(__dirname, '..'); // Se o index.html estiver solto na raiz do projeto
+}
+
+console.log('Servindo arquivos estáticos de:', staticPath);
+app.use(express.static(staticPath));
+
+// --- CONEXÃO COM O BANCO DE DADOS ---
 const dbPath = path.join(__dirname, 'database', 'grade_horaria.db');
 
-console.log('Conectando ao banco de dados em:', dbPath);
+console.log('Conectando ao banco SQLite em:', dbPath);
 
 const db = new sqlite3.Database(dbPath, (err) => {
   if (err) {
     console.error('Erro ao conectar ao banco SQLite:', err.message);
   } else {
-    console.log('Conexão estabelecida com sucesso com o SQLite.');
+    console.log('⚡ Conectado ao banco SQLite com sucesso!');
   }
 });
 
 // --- ROTAS DA API ---
 
-// Endpoint de verificação de integridade (Healthcheck)
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', database: dbPath });
+  res.json({ status: 'OK', database: dbPath, staticDir: staticPath });
 });
 
-// Endpoint de Turmas
 app.get('/api/turmas', (req, res) => {
   const query = 'SELECT * FROM turmas';
   
   db.all(query, [], (err, rows) => {
     if (err) {
       console.error('Erro ao buscar turmas:', err.message);
-      return res.status(500).json({ error: 'Erro interno ao consultar turmas no banco.' });
+      return res.status(500).json({ error: 'Erro ao consultar turmas.' });
     }
     res.json(rows);
   });
 });
 
-// Endpoint de Disciplinas / Professores
 app.get('/api/disciplinas', (req, res) => {
   const query = 'SELECT * FROM disciplinas';
   
   db.all(query, [], (err, rows) => {
     if (err) {
       console.error('Erro ao buscar disciplinas:', err.message);
-      return res.status(500).json({ error: 'Erro interno ao consultar disciplinas.' });
+      return res.status(500).json({ error: 'Erro ao consultar disciplinas.' });
     }
     res.json(rows);
   });
 });
 
-// Endpoint de Grade Horária por Turma
 app.get('/api/grade/:turmaId', (req, res) => {
   const { turmaId } = req.params;
   const query = 'SELECT * FROM grade_horaria WHERE turma_id = ?';
@@ -68,18 +75,23 @@ app.get('/api/grade/:turmaId', (req, res) => {
   db.all(query, [turmaId], (err, rows) => {
     if (err) {
       console.error('Erro ao buscar grade:', err.message);
-      return res.status(500).json({ error: 'Erro ao consultar a grade horária.' });
+      return res.status(500).json({ error: 'Erro ao consultar a grade.' });
     }
     res.json(rows);
   });
 });
 
-// Fallback para SPA / index.html
+// Rota coringa para entregar o index.html principal
 app.get('*', (req, res) => {
-  res.sendFile(path.join(publicPath, 'index.html'));
+  const indexPath = path.join(staticPath, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.status(404).send('Arquivo index.html não foi encontrado na pasta estática.');
+  }
 });
 
 // Inicialização do Servidor
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor rodando com sucesso na porta ${PORT}`);
+  console.log(`🚀 Servidor rodando na porta ${PORT}`);
 });

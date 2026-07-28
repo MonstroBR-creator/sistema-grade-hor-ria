@@ -3,58 +3,61 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sistema de Grade Horária e Professores - CEEBJA</title>
+  <title>Grade Horária e Professores</title>
   <style>
+    * {
+      box-sizing: border-box;
+      font-family: Arial, Helvetica, sans-serif;
+    }
     body {
-      font-family: Arial, sans-serif;
       background-color: #f4f6f9;
       margin: 0;
-      padding: 20px;
+      padding: 30px 15px;
       color: #333;
     }
-    .card {
+    .container {
       max-width: 900px;
       margin: 0 auto;
-      background: white;
+      background: #ffffff;
       padding: 25px;
       border-radius: 8px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
     }
     h1 {
       color: #004085;
+      font-size: 22px;
       margin-top: 0;
-    }
-    .grid-filtros {
-      display: flex;
-      gap: 15px;
-      flex-wrap: wrap;
       margin-bottom: 20px;
-      background: #e9ecef;
-      padding: 15px;
-      border-radius: 6px;
+      border-bottom: 2px solid #004085;
+      padding-bottom: 10px;
     }
-    .campo {
-      flex: 1;
-      min-width: 200px;
+    .form-group {
+      margin-bottom: 25px;
     }
     label {
-      font-weight: bold;
       display: block;
-      margin-bottom: 5px;
-      font-size: 14px;
+      font-weight: bold;
+      margin-bottom: 8px;
+      color: #495057;
     }
     select {
       width: 100%;
-      padding: 10px;
-      border-radius: 4px;
+      padding: 12px;
+      font-size: 15px;
       border: 1px solid #ced4da;
-      font-size: 14px;
-      background-color: white;
+      border-radius: 5px;
+      background-color: #fff;
+      outline: none;
+      cursor: pointer;
+    }
+    select:focus {
+      border-color: #80bdff;
+      box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25);
     }
     table {
       width: 100%;
       border-collapse: collapse;
-      margin-top: 20px;
+      margin-top: 15px;
     }
     th, td {
       padding: 12px;
@@ -68,53 +71,31 @@
     tr:nth-child(even) {
       background-color: #f8f9fa;
     }
-    .aviso {
-      padding: 15px;
-      background-color: #fff3cd;
-      border: 1px solid #ffeeba;
-      color: #856404;
-      border-radius: 4px;
+    .mensagem-status {
+      text-align: center;
+      padding: 20px;
+      color: #6c757d;
+      background-color: #e9ecef;
+      border-radius: 5px;
     }
   </style>
 </head>
 <body>
 
-  <div class="card">
-    <h1>Grade Horária de Professores</h1>
-    <p>Utilize os filtros abaixo para localizar a turma desejada:</p>
+  <div class="container">
+    <h1>Grade Horária - Quadro de Professores</h1>
 
-    <!-- Estrutura dos 3 Seletores -->
-    <div class="grid-filtros">
-      <div class="campo">
-        <label for="filtro-turno">1. Turno:</label>
-        <select id="filtro-turno">
-          <option value="">Todos os Turnos</option>
-          <option value="MANHÃ">Manhã</option>
-          <option value="TARDE">Tarde</option>
-          <option value="NOITE">Noite</option>
-        </select>
-      </div>
-
-      <div class="campo">
-        <label for="filtro-ensino">2. Ensino / Nível:</label>
-        <select id="filtro-ensino">
-          <option value="">Todos os Níveis</option>
-          <option value="FUNDAMENTAL">Ensino Fundamental</option>
-          <option value="MÉDIO">Ensino Médio</option>
-        </select>
-      </div>
-
-      <div class="campo">
-        <label for="select-turma">3. Turma / Módulo:</label>
-        <select id="select-turma">
-          <option value="">Selecione uma opção</option>
-        </select>
-      </div>
+    <!-- Único Seletor Limpo -->
+    <div class="form-group">
+      <label for="select-turma">Selecione a Turma / Módulo:</label>
+      <select id="select-turma">
+        <option value="">Carregando turmas...</option>
+      </select>
     </div>
 
-    <!-- Tabela de Exibição dos Dados -->
-    <div id="grade-container">
-      <p class="aviso">Selecione uma turma no filtro acima para visualizar os professores e matérias.</p>
+    <!-- Tabela Resultado -->
+    <div id="resultado">
+      <div class="mensagem-status">Selecione uma turma no campo acima para visualizar as disciplinas e professores.</div>
     </div>
   </div>
 

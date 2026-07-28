@@ -32,11 +32,43 @@ if (!fs.existsSync(path.join(__dirname, 'database'))) {
 }
 
 const db = new sqlite3.Database(DB_PATH, (err) => {
-  if (err) console.error('❌ Erro ao conectar no SQLite:', err.message);
-  else console.log('⚡ Conectado ao banco SQLite em:', DB_PATH);
+  if (err) {
+    console.error('❌ Erro ao conectar no SQLite:', err.message);
+  } else {
+    console.log('⚡ Conectado ao banco SQLite em:', DB_PATH);
+    auditarUsuariosEAdmin();
+  }
 });
 
 db.run('PRAGMA foreign_keys = ON;');
+
+/**
+ * Função de auditoria automática no arranque do servidor.
+ * Localiza onde o usuário admin está gravado e exibe no log do Render.
+ */
+function auditarUsuariosEAdmin() {
+  db.all(`SELECT id, nome, usuario, cpf, perfil, criado_em FROM usuarios`, [], (err, rows) => {
+    if (err) {
+      console.log('⚠️ Tabela de usuários ainda não existe ou ocorreu erro na busca:', err.message);
+      return;
+    }
+    
+    console.log('\n==================================================');
+    console.log('🔍 [AUDITORIA MONSTRO TECNOLOGIAS] USUÁRIOS NO BANCO:');
+    if (!rows || rows.length === 0) {
+      console.log('⚠️ Nenhum usuário encontrado no banco de dados!');
+    } else {
+      console.table(rows);
+      const adminFound = rows.find(u => u.usuario === 'admin' || u.perfil === 'ADMINISTRADOR');
+      if (adminFound) {
+        console.log(`✅ USUÁRIO ADMIN LOCALIZADO: ID ${adminFound.id} | Login: "${adminFound.usuario}" | Perfil: ${adminFound.perfil}`);
+      } else {
+        console.log('⚠️ Usuário com o login "admin" não foi encontrado na tabela.');
+      }
+    }
+    console.log('==================================================\n');
+  });
+}
 
 /* ==========================================
    1. AUTENTICAÇÃO E LOGIN
@@ -77,6 +109,14 @@ app.post('/api/login', (req, res) => {
       token,
       usuario: { id: usuario.id, nome: usuario.nome, usuario: usuario.usuario, perfil: usuario.perfil }
     });
+  });
+});
+
+// Rota diagnóstica para verificar admin via navegador
+app.get('/api/admin-check', (req, res) => {
+  db.all(`SELECT id, nome, usuario, cpf, perfil, criado_em FROM usuarios`, [], (err, rows) => {
+    if (err) return res.status(500).json({ erro: err.message });
+    res.json({ total: rows ? rows.length : 0, usuarios: rows || [] });
   });
 });
 
@@ -206,9 +246,14 @@ app.delete('/api/grade', (req, res) => {
    ========================================== */
 
 app.get('/login', (req, res) => res.sendFile(path.join(FRONTEND_PATH, 'login.html')));
+app.get('/login.html', (req, res) => res.sendFile(path.join(FRONTEND_PATH, 'login.html')));
+
 app.get('/usuarios', (req, res) => res.sendFile(path.join(FRONTEND_PATH, 'usuarios.html')));
+app.get('/usuarios.html', (req, res) => res.sendFile(path.join(FRONTEND_PATH, 'usuarios.html')));
+
 app.get('/', (req, res) => res.sendFile(path.join(FRONTEND_PATH, 'index.html')));
+app.get('/index.html', (req, res) => res.sendFile(path.join(FRONTEND_PATH, 'index.html')));
 
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor Monstro Tecnologias rodando em: http://localhost:${PORT}`);
+  console.log(`🚀 Servidor Monstro Tecnologias rodando na porta: ${PORT}`);
 });

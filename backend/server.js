@@ -36,37 +36,30 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
     console.error('❌ Erro ao conectar no SQLite:', err.message);
   } else {
     console.log('⚡ Conectado ao banco SQLite em:', DB_PATH);
-    auditarUsuariosEAdmin();
+    garantirTabelaUsuarios();
   }
 });
 
 db.run('PRAGMA foreign_keys = ON;');
 
 /**
- * Função de auditoria automática no arranque do servidor.
- * Localiza onde o usuário admin está gravado e exibe no log do Render.
+ * Garante a criação da tabela de usuários se ela ainda não existir no banco
  */
-function auditarUsuariosEAdmin() {
-  db.all(`SELECT id, nome, usuario, cpf, perfil, criado_em FROM usuarios`, [], (err, rows) => {
-    if (err) {
-      console.log('⚠️ Tabela de usuários ainda não existe ou ocorreu erro na busca:', err.message);
-      return;
-    }
-    
-    console.log('\n==================================================');
-    console.log('🔍 [AUDITORIA MONSTRO TECNOLOGIAS] USUÁRIOS NO BANCO:');
-    if (!rows || rows.length === 0) {
-      console.log('⚠️ Nenhum usuário encontrado no banco de dados!');
-    } else {
-      console.table(rows);
-      const adminFound = rows.find(u => u.usuario === 'admin' || u.perfil === 'ADMINISTRADOR');
-      if (adminFound) {
-        console.log(`✅ USUÁRIO ADMIN LOCALIZADO: ID ${adminFound.id} | Login: "${adminFound.usuario}" | Perfil: ${adminFound.perfil}`);
-      } else {
-        console.log('⚠️ Usuário com o login "admin" não foi encontrado na tabela.');
-      }
-    }
-    console.log('==================================================\n');
+function garantirTabelaUsuarios() {
+  const sql = `
+    CREATE TABLE IF NOT EXISTS usuarios (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nome TEXT NOT NULL,
+      usuario TEXT UNIQUE NOT NULL,
+      cpf TEXT UNIQUE,
+      senha_hash TEXT NOT NULL,
+      perfil TEXT DEFAULT 'USUARIO',
+      criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `;
+  db.run(sql, (err) => {
+    if (err) console.error('⚠️ Erro ao validar tabela usuarios:', err.message);
+    else console.log('✅ Tabela "usuarios" pronta para uso.');
   });
 }
 
@@ -112,14 +105,6 @@ app.post('/api/login', (req, res) => {
   });
 });
 
-// Rota diagnóstica para verificar admin via navegador
-app.get('/api/admin-check', (req, res) => {
-  db.all(`SELECT id, nome, usuario, cpf, perfil, criado_em FROM usuarios`, [], (err, rows) => {
-    if (err) return res.status(500).json({ erro: err.message });
-    res.json({ total: rows ? rows.length : 0, usuarios: rows || [] });
-  });
-});
-
 /* ==========================================
    2. GESTÃO DE USUÁRIOS (CRUD)
    ========================================== */
@@ -128,7 +113,10 @@ app.get('/api/admin-check', (req, res) => {
 app.get('/api/usuarios', (req, res) => {
   const query = `SELECT id, nome, usuario, cpf, perfil, criado_em FROM usuarios ORDER BY id DESC`;
   db.all(query, [], (err, rows) => {
-    if (err) return res.status(500).json({ sucesso: false, mensagem: err.message });
+    if (err) {
+      console.error('❌ Erro na consulta /api/usuarios:', err.message);
+      return res.status(500).json({ sucesso: false, mensagem: err.message });
+    }
     res.json(rows || []);
   });
 });
@@ -142,7 +130,7 @@ app.post('/api/usuarios', (req, res) => {
   }
 
   const userLimpo = String(usuario).trim().toLowerCase();
-  const cpfLimpo = cpf ? String(cpf).replace(/\D/g, '') : null;
+  const cpfLimpo = (cpf && String(cpf).trim() !== '') ? String(cpf).replace(/\D/g, '') : null;
 
   const sql = `
     INSERT INTO usuarios (nome, usuario, cpf, senha_hash, perfil)
@@ -151,6 +139,7 @@ app.post('/api/usuarios', (req, res) => {
 
   db.run(sql, [nome.trim(), userLimpo, cpfLimpo, senha_hash.trim(), perfil || 'USUARIO'], function(err) {
     if (err) {
+      console.error('❌ Erro ao inserir usuário:', err.message);
       if (err.message.includes('UNIQUE')) {
         return res.status(400).json({ sucesso: false, mensagem: 'Nome de usuário ou CPF já cadastrado.' });
       }

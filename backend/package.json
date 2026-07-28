@@ -1,11 +1,11 @@
 {
   "name": "sistema-grade-horaria",
-  "version": "1.0.0",
-  "description": "Sistema de Gestão de Grade Horária CEEBJA/EJA",
-  "main": "server.js",
+  "version": "1.2.0",
+  "description": "Sistema de Gestão de Grade Horária do CEEBJA",
+  "main": "backend/server.js",
   "scripts": {
-    "start": "node server.js",
-    "postinstall": "npm rebuild sqlite3"
+    "start": "node backend/server.js",
+    "build": "python backend/import_excel.py && python backend/criar_usuarios.py"
   },
   "dependencies": {
     "cors": "^2.8.5",

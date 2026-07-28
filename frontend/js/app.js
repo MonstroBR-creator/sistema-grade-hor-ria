@@ -1,9 +1,15 @@
+/**
+ * APP.JS - Gestão da Grade Horária
+ * Compatível com schema.sql v1.2 (alocacoes, turmas, grade_horaria)
+ */
+
 const DIAS_SEMANA = ['SEGUNDA', 'TERÇA', 'QUARTA', 'QUINTA', 'SEXTA'];
 const NUM_AULAS = [1, 2, 3, 4, 5];
 
 let turmaSelecionadaId = null;
 let alocacoesTurma = [];
-let gradeAlocada = {}; // Mapa: "DIA_SEMANA-NUM_AULA" -> alocacao_id
+let gradeAlocada = {}; // "DIA_SEMANA-NUM_AULA" -> alocacao_id
+let todasAsGradesGlobal = [];
 
 document.addEventListener('DOMContentLoaded', () => {
   inicializarSistema();
@@ -11,6 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function inicializarSistema() {
   const select = document.getElementById('select-turma-unica');
+  renderizarEstruturaQuadro();
 
   try {
     const res = await fetch('/api/turmas');
@@ -23,12 +30,27 @@ async function inicializarSistema() {
 
     select.innerHTML = '<option value="">-- SELECIONE A TURMA / MÓDULO --</option>';
 
-    turmas.forEach(t => {
-      const opt = document.createElement('option');
-      opt.value = t.id;
-      opt.textContent = `${t.nome_descricao} [${t.turno_nome || 'GERAL'}]`;
-      select.appendChild(opt);
-    });
+    // Agrupamento limpo dentro do mesmo seletor
+    const manha = turmas.filter(t => (t.nome_descricao || '').toUpperCase().includes('MANHÃ'));
+    const noite = turmas.filter(t => (t.nome_descricao || '').toUpperCase().includes('NOITE'));
+    const outros = turmas.filter(t => !manha.includes(t) && !noite.includes(t));
+
+    const adicionarGrupo = (label, lista) => {
+      if (lista.length === 0) return;
+      const group = document.createElement('optgroup');
+      group.label = `--- ${label} ---`;
+      lista.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t.id;
+        opt.textContent = `${t.nome_descricao} [${t.turno_nome || 'GERAL'}]`;
+        group.appendChild(opt);
+      });
+      select.appendChild(group);
+    };
+
+    adicionarGrupo('TURNO: MANHÃ', manha);
+    adicionarGrupo('TURNO: NOITE', noite);
+    adicionarGrupo('OUTROS / MÓDULOS', outros);
 
     select.addEventListener('change', (e) => {
       turmaSelecionadaId = e.target.value;
@@ -39,38 +61,34 @@ async function inicializarSistema() {
       }
     });
 
-    renderizarEstruturaQuadro();
-
   } catch (err) {
-    console.error('Erro ao inicializar:', err);
-    select.innerHTML = '<option value="">Erro ao conectar ao servidor</option>';
+    console.error('Erro ao conectar com API:', err);
+    select.innerHTML = '<option value="">Erro ao carregar dados do servidor</option>';
   }
 }
 
 function renderizarEstruturaQuadro() {
   const tbody = document.getElementById('corpo-quadro-grade');
+  if (!tbody) return;
   tbody.innerHTML = '';
 
   NUM_AULAS.forEach(numAula => {
     const tr = document.createElement('tr');
     tr.className = 'border-b border-slate-200';
 
-    // Coluna do Número da Aula
     const tdAula = document.createElement('td');
-    tdAula.className = 'p-2 bg-slate-100 font-bold border border-slate-200 text-slate-700';
+    tdAula.className = 'p-2 bg-slate-100 font-bold border border-slate-200 text-slate-700 w-16 text-center';
     tdAula.textContent = `${numAula}ª Aula`;
     tr.appendChild(tdAula);
 
-    // Slots para os 5 dias da semana
     DIAS_SEMANA.forEach(dia => {
       const tdSlot = document.createElement('td');
-      tdSlot.className = 'p-2 border border-slate-200 slot-aula min-h-[60px] relative bg-slate-50 transition-colors';
+      tdSlot.className = 'p-2 border border-slate-200 slot-aula min-h-[60px] relative bg-slate-50 transition-colors text-center';
       tdSlot.dataset.dia = dia;
       tdSlot.dataset.aula = numAula;
 
-      // Eventos Drag & Drop
-      tdSlot.addEventListener('dragover', e => { e.preventDefault(); tdSlot.classList.add('drag-over'); });
-      tdSlot.addEventListener('dragleave', () => tdSlot.classList.remove('drag-over'));
+      tdSlot.addEventListener('dragover', e => { e.preventDefault(); tdSlot.classList.add('bg-blue-100'); });
+      tdSlot.addEventListener('dragleave', () => tdSlot.classList.remove('bg-blue-100'));
       tdSlot.addEventListener('drop', e => tratarDropAula(e, dia, numAula));
 
       tr.appendChild(tdSlot);
@@ -82,17 +100,17 @@ function renderizarEstruturaQuadro() {
 
 async function carregarDadosTurma(turmaId) {
   try {
-    // 1. Busca as alocações (cards disponíveis)
-    const resAloc = await fetch(`/api/alocacoes/${turmaId}`);
-    alocacoesTurma = await resAloc.json();
+    // 1. Busca alocações (cards de matérias/professores da turma)
+    const resAloc = await fetch(`/api/alocacoes`);
+    const todasAlocacoes = await resAloc.json();
+    alocacoesTurma = todasAlocacoes.filter(a => String(a.turma_id) === String(turmaId));
 
     // 2. Busca a grade montada salva no SQLite
     const resGrade = await fetch('/api/grade');
-    const todasGrades = await resGrade.json();
-    
-    // Filtra a grade da turma atual
-    const gradeTurma = todasGrades.filter(g => String(g.turma_id) === String(turmaId));
-    
+    todasAsGradesGlobal = await resGrade.json();
+
+    const gradeTurma = todasAsGradesGlobal.filter(g => String(g.turma_id) === String(turmaId));
+
     gradeAlocada = {};
     gradeTurma.forEach(g => {
       gradeAlocada[`${g.dia_semana}-${g.num_aula}`] = g.alocacao_id;
@@ -100,32 +118,33 @@ async function carregarDadosTurma(turmaId) {
 
     renderizarCardsDisponiveis();
     atualizarQuadroGrade();
-    verificarConflitosGerais(todasGrades);
+    verificarConflitosGerais();
 
   } catch (err) {
-    console.error('Erro ao carregar dados:', err);
+    console.error('Erro ao carregar turma:', err);
   }
 }
 
 function renderizarCardsDisponiveis() {
   const container = document.getElementById('container-cards-disponiveis');
+  if (!container) return;
   container.innerHTML = '';
 
   if (!alocacoesTurma || alocacoesTurma.length === 0) {
-    container.innerHTML = '<p class="text-xs text-slate-400 italic text-center py-4">Nenhuma matéria para esta turma.</p>';
+    container.innerHTML = '<p class="text-xs text-slate-400 italic text-center py-4">Nenhuma disciplina cadastrada.</p>';
     return;
   }
 
   alocacoesTurma.forEach(item => {
     const card = document.createElement('div');
     card.draggable = true;
-    card.className = 'p-3 bg-white border border-slate-200 rounded-lg shadow-sm cursor-grab active:cursor-grabbing hover:border-blue-400 transition-all';
+    card.className = 'p-3 bg-white border border-slate-200 rounded-lg shadow-sm cursor-grab active:cursor-grabbing hover:border-blue-500 transition-all mb-2';
     card.dataset.alocacaoId = item.alocacao_id;
 
     card.innerHTML = `
       <div class="font-bold text-slate-800 text-xs mb-1">${item.disciplina_nome}</div>
       <div class="text-[11px] text-slate-600">${item.professor_nome || 'A DEFINIR'}</div>
-      <div class="text-[10px] text-slate-400 mt-1 uppercase">${item.tipo || 'PRESENCIAL'}</div>
+      <div class="text-[10px] text-blue-600 mt-1 uppercase font-semibold">${item.tipo || 'PRESENCIAL'}</div>
     `;
 
     card.addEventListener('dragstart', e => {
@@ -150,7 +169,7 @@ function atualizarQuadroGrade() {
           const aloc = alocacoesTurma.find(a => String(a.alocacao_id) === String(alocacaoId));
           if (aloc) {
             const cardSlot = document.createElement('div');
-            cardSlot.className = 'p-2 bg-blue-50 border border-blue-300 rounded text-left relative group';
+            cardSlot.className = 'p-2 bg-blue-50 border border-blue-300 rounded text-left relative group shadow-sm';
             cardSlot.innerHTML = `
               <button onclick="removerAulaGrade('${dia}', ${aula})" class="absolute top-1 right-1 text-red-500 font-bold text-xs opacity-0 group-hover:opacity-100 hover:text-red-700">&times;</button>
               <div class="font-bold text-slate-800 text-[11px]">${aloc.disciplina_nome}</div>
@@ -167,12 +186,11 @@ function atualizarQuadroGrade() {
 async function tratarDropAula(e, dia, numAula) {
   e.preventDefault();
   const slot = e.currentTarget;
-  slot.classList.remove('drag-over');
+  slot.classList.remove('bg-blue-100');
 
   const alocacaoId = e.dataTransfer.getData('text/plain');
   if (!alocacaoId || !turmaSelecionadaId) return;
 
-  // Salva via API POST /api/grade
   try {
     const response = await fetch('/api/grade', {
       method: 'POST',
@@ -187,10 +205,10 @@ async function tratarDropAula(e, dia, numAula) {
 
     if (response.ok) {
       gradeAlocada[`${dia}-${numAula}`] = alocacaoId;
-      carregarDadosTurma(turmaSelecionadaId); // Recarrega para atualizar quadro e validar conflitos
+      carregarDadosTurma(turmaSelecionadaId);
     }
   } catch (err) {
-    console.error('Erro ao salvar aula na grade:', err);
+    console.error('Erro ao salvar na grade:', err);
   }
 }
 
@@ -215,16 +233,17 @@ async function removerAulaGrade(dia, numAula) {
   }
 }
 
-// Checagem de Conflito: Avisa se o mesmo professor dá aula em 2 turmas no mesmo dia e horário
-function verificarConflitosGerais(todasGrades) {
+function verificarConflitosGerais() {
   const alertaDiv = document.getElementById('painel-alerta');
+  if (!alertaDiv) return;
+
   alertaDiv.classList.add('hidden');
   alertaDiv.innerHTML = '';
 
-  const ocupacaoProfessor = {}; // "PROFESSOR-DIA-AULA" -> turma_id
+  const ocupacaoProfessor = {};
   let conflitos = [];
 
-  todasGrades.forEach(g => {
+  todasAsGradesGlobal.forEach(g => {
     const prof = g.professor_nome;
     if (prof && prof !== 'A DEFINIR') {
       const chave = `${prof}-${g.dia_semana}-${g.num_aula}`;
@@ -238,8 +257,8 @@ function verificarConflitosGerais(todasGrades) {
 
   if (conflitos.length > 0) {
     alertaDiv.innerHTML = `
-      ⚠️ <strong>ALERTA DE CONFLITO DE HORÁRIO DE DOCENTE!</strong><br>
-      O sistema detectou professores alocados no mesmo dia/horário em turmas diferentes:
+      ⚠️ <strong>ALERTA DE CONFLITO DE HORÁRIO!</strong><br>
+      O mesmo professor foi alocado no mesmo horário em turmas diferentes:
       <ul class="list-disc ml-5 mt-1 font-normal">
         ${conflitos.map(c => `<li><strong>${c.professor}</strong>: ${c.dia}, ${c.aula}ª Aula</li>`).join('')}
       </ul>
@@ -249,7 +268,9 @@ function verificarConflitosGerais(todasGrades) {
 }
 
 function limparTelas() {
-  document.getElementById('container-cards-disponiveis').innerHTML = '<p class="text-xs text-slate-400 italic text-center py-4">Selecione uma turma no filtro.</p>';
+  const container = document.getElementById('container-cards-disponiveis');
+  if (container) container.innerHTML = '<p class="text-xs text-slate-400 italic text-center py-4">Selecione uma turma no filtro.</p>';
   renderizarEstruturaQuadro();
-  document.getElementById('painel-alerta').classList.add('hidden');
+  const alerta = document.getElementById('painel-alerta');
+  if (alerta) alerta.classList.add('hidden');
 }

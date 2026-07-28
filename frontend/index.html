@@ -3,29 +3,33 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sistema de Grade Horária — CEEBJA</title>
+  <title>Sistema de Grade Horária e Alocações — CEEBJA</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-slate-50 min-h-screen p-6">
+<body class="bg-slate-100 min-h-screen p-4 md:p-8">
 
-  <div class="max-w-4xl mx-auto bg-white rounded-xl shadow-md border border-slate-200 p-6">
-    <div class="border-b border-slate-200 pb-4 mb-6">
-      <h1 class="text-2xl font-bold text-slate-800">Grade Horária e Quadro de Professores</h1>
-      <p class="text-sm text-slate-500">CEEBJA / EJA — Consulta de Disciplinas e Alocações</p>
+  <div class="max-w-6xl mx-auto bg-white rounded-xl shadow-lg border border-slate-200 p-6">
+    <div class="flex flex-col md:flex-row md:items-center justify-between border-b border-slate-200 pb-4 mb-6 gap-4">
+      <div>
+        <h1 class="text-2xl font-bold text-slate-800">Grade Horária & Quadro de Docentes</h1>
+        <p class="text-xs text-slate-500">Gestão do CEEBJA — Presencial e Semipresencial</p>
+      </div>
     </div>
 
-    <!-- Único Seletor Limpo -->
-    <div class="mb-6">
-      <label for="select-turma" class="block text-sm font-bold text-slate-700 mb-2">Selecione a Turma / Módulo:</label>
-      <select id="select-turma" class="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none">
-        <option value="">Carregando turmas...</option>
+    <!-- FILTRO ÚNICO CENTRALIZADO -->
+    <div class="mb-8">
+      <label for="select-turma-unica" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+        Selecione o Turno / Módulo / Turma:
+      </label>
+      <select id="select-turma-unica" class="w-full p-3 bg-white border border-slate-300 rounded-lg text-sm font-medium text-slate-700 shadow-sm focus:ring-2 focus:ring-blue-500 outline-none">
+        <option value="">Carregando opções...</option>
       </select>
     </div>
 
-    <!-- Tabela Resultado -->
-    <div id="resultado">
-      <div class="p-6 text-center text-slate-500 bg-slate-50 rounded-lg border border-dashed border-slate-300 text-sm">
-        Selecione uma turma no campo acima para visualizar as disciplinas e professores.
+    <!-- ÁREA DE EXIBIÇÃO EM CARDS -->
+    <div id="container-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div class="col-span-full p-8 text-center bg-slate-50 rounded-lg border-2 border-dashed border-slate-200 text-slate-400 text-sm">
+        Selecione uma opção no filtro acima para carregar os cards das disciplinas e professores.
       </div>
     </div>
   </div>

@@ -42,8 +42,7 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
 db.run('PRAGMA foreign_keys = ON;');
 
 /**
- * MIGRATION AUTOMÁTICA
- * Garante que a tabela exista e cria a coluna 'criado_em' caso não exista
+ * MIGRATION AUTOMÁTICA & SEED DE USUÁRIOS NA FONTE
  */
 function garantirTabelaUsuarios() {
   const sqlCreate = `
@@ -53,7 +52,8 @@ function garantirTabelaUsuarios() {
       usuario TEXT UNIQUE NOT NULL,
       cpf TEXT UNIQUE,
       senha_hash TEXT NOT NULL,
-      perfil TEXT DEFAULT 'USUARIO'
+      perfil TEXT DEFAULT 'USUARIO',
+      criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `;
   
@@ -62,11 +62,59 @@ function garantirTabelaUsuarios() {
       console.error('⚠️ Erro ao validar tabela usuarios:', err.message);
     } else {
       console.log('✅ Tabela "usuarios" validada com sucesso.');
-      db.run(`ALTER TABLE usuarios ADD COLUMN criado_em DATETIME DEFAULT CURRENT_TIMESTAMP`, () => {
-        // Ignora caso a coluna já exista
-      });
+      db.run(`ALTER TABLE usuarios ADD COLUMN criado_em DATETIME DEFAULT CURRENT_TIMESTAMP`, () => {});
+      povoarUsuariosIniciais();
     }
   });
+}
+
+/**
+ * Povoa os usuários padrão fixos na fonte
+ */
+function povoarUsuariosIniciais() {
+  const usuariosIniciais = [
+    {
+      nome: 'Robson Antonio dos Santos Machado',
+      usuario: 'robsonmachado',
+      cpf: '00660667940',
+      senha_hash: '@Rthur020807',
+      perfil: 'ADMINISTRADOR'
+    },
+    {
+      nome: 'Fernanda Paula Evangelista',
+      usuario: 'ferpaula',
+      cpf: '00545586976',
+      senha_hash: '00545586976',
+      perfil: 'ADMINISTRADOR'
+    },
+    {
+      nome: 'Izabela Ceccato de Lima Baggio',
+      usuario: 'izabela',
+      cpf: '60253363934',
+      senha_hash: '60253363934',
+      perfil: 'PEDAGOGICO'
+    },
+    {
+      nome: 'Visualizador (Somente Leitura)',
+      usuario: 'consulta',
+      cpf: '33333333333',
+      senha_hash: 'CAPS2026*',
+      perfil: 'CONSULTA'
+    }
+  ];
+
+  const sql = `
+    INSERT OR IGNORE INTO usuarios (nome, usuario, cpf, senha_hash, perfil)
+    VALUES (?, ?, ?, ?, ?)
+  `;
+
+  usuariosIniciais.forEach((u) => {
+    db.run(sql, [u.nome, u.usuario, u.cpf, u.senha_hash, u.perfil], (err) => {
+      if (err) console.error(`⚠️ Erro ao povoar usuário ${u.usuario}:`, err.message);
+    });
+  });
+
+  console.log('🌱 Usuários máster e de consulta carregados na fonte!');
 }
 
 /* ==========================================
@@ -115,19 +163,14 @@ app.post('/api/login', (req, res) => {
    2. GESTÃO DE USUÁRIOS (CRUD)
    ========================================== */
 
-// Listar todos os usuários
 app.get('/api/usuarios', (req, res) => {
   const query = `SELECT id, nome, usuario, cpf, perfil FROM usuarios ORDER BY id DESC`;
   db.all(query, [], (err, rows) => {
-    if (err) {
-      console.error('❌ Erro na consulta /api/usuarios:', err.message);
-      return res.status(500).json({ sucesso: false, mensagem: err.message });
-    }
+    if (err) return res.status(500).json({ sucesso: false, mensagem: err.message });
     res.json(rows || []);
   });
 });
 
-// Cadastrar novo usuário
 app.post('/api/usuarios', (req, res) => {
   const { nome, usuario, cpf, senha_hash, perfil } = req.body;
 
@@ -154,8 +197,6 @@ app.post('/api/usuarios', (req, res) => {
   });
 });
 
-// Excluir usuário pelo ID
-// Trava flexível: Bloqueia a exclusão do seu usuário máster (ou previne a exclusão do último administrador)
 app.delete('/api/usuarios/:id', (req, res) => {
   const { id } = req.params;
 
@@ -163,13 +204,12 @@ app.delete('/api/usuarios/:id', (req, res) => {
     if (err) return res.status(500).json({ sucesso: false, mensagem: err.message });
     if (!u) return res.status(404).json({ sucesso: false, mensagem: 'Usuário não encontrado.' });
 
-    // Define os logins máster protegidos da RASM Tecnologia (adicione seu login se desejar)
     const PROTECTED_USERS = ['monstro', 'monstrobr', 'rasmadmin'];
 
     if (PROTECTED_USERS.includes(u.usuario.toLowerCase())) {
       return res.status(403).json({ 
         sucesso: false, 
-        mensagem: `Ação negada: O usuário administrador máster (${u.usuario}) é protegido!` 
+        mensagem: `Ação negada: O usuário administrador geral (${u.usuario}) é protegido!` 
       });
     }
 

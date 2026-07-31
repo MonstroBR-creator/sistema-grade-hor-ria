@@ -17,8 +17,8 @@ const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'ceebja_chave_secreta_super_segura_2026';
 
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 const FRONTEND_PATH = path.join(__dirname, '..', 'frontend');
 app.use(express.static(FRONTEND_PATH));
@@ -33,7 +33,6 @@ let pgPool = null;
 let sqliteDb = null;
 
 if (DATABASE_URL) {
-  // Conexão PostgreSQL Persistente (Produção no Render)
   isPostgres = true;
   pgPool = new Pool({
     connectionString: DATABASE_URL,
@@ -42,7 +41,6 @@ if (DATABASE_URL) {
   console.log('⚡ Conectado ao banco POSTGRESQL (Dados Persistentes Ativados!)');
   garantirEstruturaPostgres();
 } else {
-  // Fallback SQLite (Apenas para Testes Locais)
   console.log('⚠️ Rodando com SQLite Local (Uso em Desenvolvimento)');
   const DB_PATH = path.join(__dirname, 'database', 'grade_horaria.db');
   if (!fs.existsSync(path.join(__dirname, 'database'))) {
@@ -53,10 +51,9 @@ if (DATABASE_URL) {
   });
 }
 
-// Executor universal de queries
+// Executor universal de queries com bind seguro de parâmetros
 async function executarQuery(sql, params = []) {
   if (isPostgres) {
-    // Converte sintaxe de parâmetro de ? para $1, $2 (Requisito do Postgres)
     let contador = 1;
     const sqlPostgres = sql.replace(/\?/g, () => `$${contador++}`);
     const res = await pgPool.query(sqlPostgres, params);
@@ -76,7 +73,7 @@ async function executarQuery(sql, params = []) {
 }
 
 /* ==========================================
-   MIGRATIONS E ESTRUTURA DO BANCO
+   MIGRATIONS E CARGA INICIAL (SAFE SEED)
    ========================================== */
 
 async function garantirEstruturaPostgres() {
@@ -92,18 +89,34 @@ async function garantirEstruturaPostgres() {
         criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
+      CREATE TABLE IF NOT EXISTS turnos (
+        id SERIAL PRIMARY KEY,
+        codigo VARCHAR(20) UNIQUE NOT NULL,
+        nome VARCHAR(100) NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS turmas (
         id SERIAL PRIMARY KEY,
         nome_descricao VARCHAR(255) NOT NULL,
-        turno_id INT
+        turno_id INT REFERENCES turnos(id) ON DELETE SET NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS disciplinas (
+        id SERIAL PRIMARY KEY,
+        nome VARCHAR(100) UNIQUE NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS professores (
+        id SERIAL PRIMARY KEY,
+        nome VARCHAR(255) NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS alocacoes (
         id SERIAL PRIMARY KEY,
-        turma_id INT,
-        disciplina_id INT,
-        professor_id INT,
-        tipo VARCHAR(50)
+        turma_id INT REFERENCES turmas(id) ON DELETE CASCADE,
+        disciplina_id INT REFERENCES disciplinas(id) ON DELETE CASCADE,
+        professor_id INT REFERENCES professores(id) ON DELETE SET NULL,
+        tipo VARCHAR(50) DEFAULT 'INDIVIDUAL'
       );
 
       CREATE TABLE IF NOT EXISTS grade_horaria (
@@ -117,6 +130,7 @@ async function garantirEstruturaPostgres() {
     `);
     console.log('✅ Tabelas no PostgreSQL validadas com sucesso!');
     await povoarUsuariosIniciais();
+    await povoarEstruturaEjaInicial();
   } catch (err) {
     console.error('❌ Erro ao criar estrutura no Postgres:', err.message);
   }
@@ -134,7 +148,9 @@ function garantirEstruturaSqlite() {
       criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `;
-  sqliteDb.run(sql, () => povoarUsuariosIniciais());
+  sqliteDb.run(sql, () => {
+    povoarUsuariosIniciais();
+  });
 }
 
 async function povoarUsuariosIniciais() {
@@ -159,11 +175,86 @@ async function povoarUsuariosIniciais() {
           u
         );
       }
-    } catch (e) {
-      // Ignora duplicados no arranque
-    }
+    } catch (e) {}
   }
-  console.log('🌱 Usuários base carregados/verificados.');
+  console.log('🌱 Usuários base validados no banco.');
+}
+
+/**
+ * Povoa o esqueleto de Turnos, Turmas, Disciplinas e Alocações da EJA
+ * Apenas se as tabelas estiverem totalmente vazias (preserva qualquer dado existente)
+ */
+async function povoarEstruturaEjaInicial() {
+  if (!isPostgres) return;
+
+  try {
+    const qtdTurmas = await pgPool.query(`SELECT COUNT(*) FROM turmas`);
+    if (parseInt(qtdTurmas.rows[0].count) > 0) {
+      console.log('ℹ️ Base de turmas já possui dados. Carga inicial ignorada para preservar edições.');
+      return;
+    }
+
+    // 1. Inserir Turnos Padronizados da EJA
+    await pgPool.query(`
+      INSERT INTO turnos (id, codigo, nome) VALUES 
+      (1, 'M', 'MATUTINO'),
+      (2, 'V', 'VESPERTINO'),
+      (3, 'N', 'NOTURNO')
+      ON CONFLICT (codigo) DO NOTHING;
+    `);
+
+    // 2. Inserir Turmas Iniciais CEEBJA / EJA
+    await pgPool.query(`
+      INSERT INTO turmas (id, nome_descricao, turno_id) VALUES 
+      (1, 'EJA F1 - Ensino Fundamental Fase I (Manhã)', 1),
+      (2, 'EJA F2 - Ensino Fundamental Fase II (Manhã)', 1),
+      (3, 'EJA M1 - Ensino Médio Bloco I (Noite)', 3),
+      (4, 'EJA M2 - Ensino Médio Bloco II (Noite)', 3)
+      ON CONFLICT DO NOTHING;
+    `);
+
+    // 3. Disciplinas da Base Nacional Comum EJA Paraná
+    await pgPool.query(`
+      INSERT INTO disciplinas (id, nome) VALUES 
+      (1, 'Língua Portuguesa'),
+      (2, 'Matemática'),
+      (3, 'História'),
+      (4, 'Geografia'),
+      (5, 'Biologia / Ciências'),
+      (6, 'Física'),
+      (7, 'Química'),
+      (8, 'Inglês'),
+      (9, 'Arte'),
+      (10, 'Educação Física')
+      ON CONFLICT (nome) DO NOTHING;
+    `);
+
+    // 4. Professor Genérico Inicial (Você poderá renomear na interface/planilha)
+    await pgPool.query(`
+      INSERT INTO professores (id, nome) VALUES 
+      (1, 'A DEFINIR / A ALOCAR')
+      ON CONFLICT DO NOTHING;
+    `);
+
+    // 5. Alocações Base
+    await pgPool.query(`
+      INSERT INTO alocacoes (turma_id, disciplina_id, professor_id, tipo) VALUES 
+      (1, 1, 1, 'INDIVIDUAL'),
+      (1, 2, 1, 'INDIVIDUAL'),
+      (2, 1, 1, 'INDIVIDUAL'),
+      (2, 2, 1, 'INDIVIDUAL'),
+      (3, 1, 1, 'INDIVIDUAL'),
+      (3, 2, 1, 'INDIVIDUAL'),
+      (3, 6, 1, 'INDIVIDUAL'),
+      (4, 2, 1, 'INDIVIDUAL'),
+      (4, 7, 1, 'INDIVIDUAL')
+      ON CONFLICT DO NOTHING;
+    `);
+
+    console.log('✅ Carga inicial da estrutura EJA/CEEBJA concluída com sucesso!');
+  } catch (err) {
+    console.error('⚠️ Aviso na carga inicial da EJA:', err.message);
+  }
 }
 
 /* ==========================================
@@ -269,14 +360,16 @@ app.delete('/api/usuarios/:id', async (req, res) => {
 });
 
 /* ==========================================
-   3. OPERAÇÕES DA GRADE HORÁRIA
+   3. OPERAÇÕES DA GRADE HORÁRIA E ALOCAÇÕES
    ========================================== */
 
 app.get('/api/turmas', async (req, res) => {
   try {
     const rows = await executarQuery(`
-      SELECT t.id, t.nome_descricao, tu.codigo AS turno_codigo, tu.nome AS turno_nome 
-      FROM turmas t JOIN turnos tu ON t.turno_id = tu.id ORDER BY t.id ASC
+      SELECT t.id, t.nome_descricao, COALESCE(tu.codigo, 'N/A') AS turno_codigo, COALESCE(tu.nome, 'GERAL') AS turno_nome 
+      FROM turmas t 
+      LEFT JOIN turnos tu ON t.turno_id = tu.id 
+      ORDER BY t.id ASC
     `);
     res.json(rows || []);
   } catch (err) {

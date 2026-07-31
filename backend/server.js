@@ -1,143 +1,51 @@
 /**
- * SERVER.JS - API REST Express / PostgreSQL (Com fallback SQLite local)
- * Arquitetura: Clean Code / REST API Persistente
+ * SERVER.JS - API REST Express / SQLite e Servidor Estático
+ * Arquitetura: Clean Code / REST API
  * Desenvolvido por RASM Tecnologia
  */
 
 const express = require('express');
 const cors = require('cors');
+const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
 const jwt = require('jsonwebtoken');
-const { Pool } = require('pg');
-const sqlite3 = require('sqlite3').verbose();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || 'ceebja_chave_secreta_super_segura_2026';
+const JWT_SECRET = 'ceebja_chave_secreta_super_segura_2026';
 
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
+// Servidor de arquivos estáticos da pasta frontend
 const FRONTEND_PATH = path.join(__dirname, '..', 'frontend');
 app.use(express.static(FRONTEND_PATH));
 
-/* ==========================================
-   CONFIGURAÇÃO DE BANCO DE DADOS (POSTGRES / SQLITE)
-   ========================================== */
+// Conexão com o Banco SQLite
+const DB_PATH = path.join(__dirname, 'database', 'grade_horaria.db');
 
-const DATABASE_URL = process.env.DATABASE_URL;
-let isPostgres = false;
-let pgPool = null;
-let sqliteDb = null;
-
-if (DATABASE_URL) {
-  isPostgres = true;
-  pgPool = new Pool({
-    connectionString: DATABASE_URL,
-    ssl: { rejectUnauthorized: false }
-  });
-  console.log('⚡ Conectado ao banco POSTGRESQL (Dados Persistentes Ativados!)');
-  garantirEstruturaPostgres();
-} else {
-  console.log('⚠️ Rodando com SQLite Local (Uso em Desenvolvimento)');
-  const DB_PATH = path.join(__dirname, 'database', 'grade_horaria.db');
-  if (!fs.existsSync(path.join(__dirname, 'database'))) {
-    fs.mkdirSync(path.join(__dirname, 'database'), { recursive: true });
-  }
-  sqliteDb = new sqlite3.Database(DB_PATH, (err) => {
-    if (!err) garantirEstruturaSqlite();
-  });
+if (!fs.existsSync(path.join(__dirname, 'database'))) {
+  fs.mkdirSync(path.join(__dirname, 'database'), { recursive: true });
 }
 
-// Executor universal de queries com bind seguro de parâmetros
-async function executarQuery(sql, params = []) {
-  if (isPostgres) {
-    let contador = 1;
-    const sqlPostgres = sql.replace(/\?/g, () => `$${contador++}`);
-    const res = await pgPool.query(sqlPostgres, params);
-    return res.rows;
+const db = new sqlite3.Database(DB_PATH, (err) => {
+  if (err) {
+    console.error('❌ Erro SQLite:', err.message);
   } else {
-    return new Promise((resolve, reject) => {
-      if (sql.trim().toUpperCase().startsWith('SELECT')) {
-        sqliteDb.all(sql, params, (err, rows) => (err ? reject(err) : resolve(rows || [])));
-      } else {
-        sqliteDb.run(sql, params, function (err) {
-          if (err) reject(err);
-          else resolve({ lastID: this.lastID, changes: this.changes });
-        });
-      }
-    });
+    console.log('⚡ Conectado ao banco SQLite em:', DB_PATH);
+    garantirTabelaUsuarios();
   }
-}
+});
 
-/* ==========================================
-   MIGRATIONS E CARGA INICIAL (SAFE SEED)
-   ========================================== */
+db.run('PRAGMA foreign_keys = ON;');
 
-async function garantirEstruturaPostgres() {
-  try {
-    await pgPool.query(`
-      CREATE TABLE IF NOT EXISTS usuarios (
-        id SERIAL PRIMARY KEY,
-        nome VARCHAR(255) NOT NULL,
-        usuario VARCHAR(100) UNIQUE NOT NULL,
-        cpf VARCHAR(20) UNIQUE,
-        senha_hash VARCHAR(255) NOT NULL,
-        perfil VARCHAR(50) DEFAULT 'USUARIO',
-        criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS turnos (
-        id SERIAL PRIMARY KEY,
-        codigo VARCHAR(20) UNIQUE NOT NULL,
-        nome VARCHAR(100) NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS turmas (
-        id SERIAL PRIMARY KEY,
-        nome_descricao VARCHAR(255) NOT NULL,
-        turno_id INT REFERENCES turnos(id) ON DELETE SET NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS disciplinas (
-        id SERIAL PRIMARY KEY,
-        nome VARCHAR(100) UNIQUE NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS professores (
-        id SERIAL PRIMARY KEY,
-        nome VARCHAR(255) NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS alocacoes (
-        id SERIAL PRIMARY KEY,
-        turma_id INT REFERENCES turmas(id) ON DELETE CASCADE,
-        disciplina_id INT REFERENCES disciplinas(id) ON DELETE CASCADE,
-        professor_id INT REFERENCES professores(id) ON DELETE SET NULL,
-        tipo VARCHAR(50) DEFAULT 'INDIVIDUAL'
-      );
-
-      CREATE TABLE IF NOT EXISTS grade_horaria (
-        id SERIAL PRIMARY KEY,
-        turma_id INT NOT NULL,
-        dia_semana INT NOT NULL,
-        num_aula INT NOT NULL,
-        alocacao_id INT NOT NULL,
-        CONSTRAINT uq_grade UNIQUE(turma_id, dia_semana, num_aula)
-      );
-    `);
-    console.log('✅ Tabelas no PostgreSQL validadas com sucesso!');
-    await povoarUsuariosIniciais();
-    await povoarEstruturaEjaInicial();
-  } catch (err) {
-    console.error('❌ Erro ao criar estrutura no Postgres:', err.message);
-  }
-}
-
-function garantirEstruturaSqlite() {
-  const sql = `
+/**
+ * MIGRATION AUTOMÁTICA & SEED DE USUÁRIOS NA FONTE
+ */
+function garantirTabelaUsuarios() {
+  const sqlCreate = `
     CREATE TABLE IF NOT EXISTS usuarios (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       nome TEXT NOT NULL,
@@ -148,121 +56,74 @@ function garantirEstruturaSqlite() {
       criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `;
-  sqliteDb.run(sql, () => {
-    povoarUsuariosIniciais();
+  
+  db.run(sqlCreate, (err) => {
+    if (err) {
+      console.error('⚠️ Erro ao validar tabela usuarios:', err.message);
+    } else {
+      console.log('✅ Tabela "usuarios" validada com sucesso.');
+      db.run(`ALTER TABLE usuarios ADD COLUMN criado_em DATETIME DEFAULT CURRENT_TIMESTAMP`, () => {});
+      povoarUsuariosIniciais();
+    }
   });
 }
 
-async function povoarUsuariosIniciais() {
-  const usuarios = [
-    ['Administrador Geral (Monstro)', 'monstro', '11111111111', 'monstro2026', 'ADMINISTRADOR'],
-    ['Administrador do Sistema', 'admin', '00000000000', 'admin123', 'ADMINISTRADOR'],
-    ['Equipe Pedagógica', 'pedagogico', '22222222222', 'pedagogico123', 'PEDAGOGICO'],
-    ['Visualizador (Somente Leitura)', 'consulta', '33333333333', 'consulta123', 'CONSULTA']
+/**
+ * Povoa os usuários padrão fixos na fonte
+ */
+function povoarUsuariosIniciais() {
+  const usuariosIniciais = [
+    {
+      nome: 'Administrador Geral (Monstro)',
+      usuario: 'monstro',
+      cpf: '11111111111',
+      senha_hash: 'monstro2026',
+      perfil: 'ADMINISTRADOR'
+    },
+    {
+      nome: 'Administrador do Sistema',
+      usuario: 'admin',
+      cpf: '00000000000',
+      senha_hash: 'admin123',
+      perfil: 'ADMINISTRADOR'
+    },
+    {
+      nome: 'Equipe Pedagógica',
+      usuario: 'pedagogico',
+      cpf: '22222222222',
+      senha_hash: 'pedagogico123',
+      perfil: 'PEDAGOGICO'
+    },
+    {
+      nome: 'Visualizador (Somente Leitura)',
+      usuario: 'consulta',
+      cpf: '33333333333',
+      senha_hash: 'consulta123',
+      perfil: 'CONSULTA'
+    }
   ];
 
-  for (const u of usuarios) {
-    try {
-      if (isPostgres) {
-        await pgPool.query(
-          `INSERT INTO usuarios (nome, usuario, cpf, senha_hash, perfil) 
-           VALUES ($1, $2, $3, $4, $5) ON CONFLICT (usuario) DO NOTHING`,
-          u
-        );
-      } else {
-        sqliteDb.run(
-          `INSERT OR IGNORE INTO usuarios (nome, usuario, cpf, senha_hash, perfil) VALUES (?, ?, ?, ?, ?)`,
-          u
-        );
-      }
-    } catch (e) {}
-  }
-  console.log('🌱 Usuários base validados no banco.');
-}
+  const sql = `
+    INSERT OR IGNORE INTO usuarios (nome, usuario, cpf, senha_hash, perfil)
+    VALUES (?, ?, ?, ?, ?)
+  `;
 
-/**
- * Povoa o esqueleto de Turnos, Turmas, Disciplinas e Alocações da EJA
- * Apenas se as tabelas estiverem totalmente vazias (preserva qualquer dado existente)
- */
-async function povoarEstruturaEjaInicial() {
-  if (!isPostgres) return;
+  usuariosIniciais.forEach((u) => {
+    db.run(sql, [u.nome, u.usuario, u.cpf, u.senha_hash, u.perfil], (err) => {
+      if (err) console.error(`⚠️ Erro ao povoar usuário ${u.usuario}:`, err.message);
+    });
+  });
 
-  try {
-    const qtdTurmas = await pgPool.query(`SELECT COUNT(*) FROM turmas`);
-    if (parseInt(qtdTurmas.rows[0].count) > 0) {
-      console.log('ℹ️ Base de turmas já possui dados. Carga inicial ignorada para preservar edições.');
-      return;
-    }
-
-    // 1. Inserir Turnos Padronizados da EJA
-    await pgPool.query(`
-      INSERT INTO turnos (id, codigo, nome) VALUES 
-      (1, 'M', 'MATUTINO'),
-      (2, 'V', 'VESPERTINO'),
-      (3, 'N', 'NOTURNO')
-      ON CONFLICT (codigo) DO NOTHING;
-    `);
-
-    // 2. Inserir Turmas Iniciais CEEBJA / EJA
-    await pgPool.query(`
-      INSERT INTO turmas (id, nome_descricao, turno_id) VALUES 
-      (1, 'EJA F1 - Ensino Fundamental Fase I (Manhã)', 1),
-      (2, 'EJA F2 - Ensino Fundamental Fase II (Manhã)', 1),
-      (3, 'EJA M1 - Ensino Médio Bloco I (Noite)', 3),
-      (4, 'EJA M2 - Ensino Médio Bloco II (Noite)', 3)
-      ON CONFLICT DO NOTHING;
-    `);
-
-    // 3. Disciplinas da Base Nacional Comum EJA Paraná
-    await pgPool.query(`
-      INSERT INTO disciplinas (id, nome) VALUES 
-      (1, 'Língua Portuguesa'),
-      (2, 'Matemática'),
-      (3, 'História'),
-      (4, 'Geografia'),
-      (5, 'Biologia / Ciências'),
-      (6, 'Física'),
-      (7, 'Química'),
-      (8, 'Inglês'),
-      (9, 'Arte'),
-      (10, 'Educação Física')
-      ON CONFLICT (nome) DO NOTHING;
-    `);
-
-    // 4. Professor Genérico Inicial (Você poderá renomear na interface/planilha)
-    await pgPool.query(`
-      INSERT INTO professores (id, nome) VALUES 
-      (1, 'A DEFINIR / A ALOCAR')
-      ON CONFLICT DO NOTHING;
-    `);
-
-    // 5. Alocações Base
-    await pgPool.query(`
-      INSERT INTO alocacoes (turma_id, disciplina_id, professor_id, tipo) VALUES 
-      (1, 1, 1, 'INDIVIDUAL'),
-      (1, 2, 1, 'INDIVIDUAL'),
-      (2, 1, 1, 'INDIVIDUAL'),
-      (2, 2, 1, 'INDIVIDUAL'),
-      (3, 1, 1, 'INDIVIDUAL'),
-      (3, 2, 1, 'INDIVIDUAL'),
-      (3, 6, 1, 'INDIVIDUAL'),
-      (4, 2, 1, 'INDIVIDUAL'),
-      (4, 7, 1, 'INDIVIDUAL')
-      ON CONFLICT DO NOTHING;
-    `);
-
-    console.log('✅ Carga inicial da estrutura EJA/CEEBJA concluída com sucesso!');
-  } catch (err) {
-    console.error('⚠️ Aviso na carga inicial da EJA:', err.message);
-  }
+  console.log('🌱 Usuários máster e de consulta carregados na fonte!');
 }
 
 /* ==========================================
    1. AUTENTICAÇÃO E LOGIN
    ========================================== */
 
-app.post('/api/login', async (req, res) => {
+app.post('/api/login', (req, res) => {
   const { identificador, senha } = req.body;
+
   if (!identificador || !senha) {
     return res.status(400).json({ sucesso: false, mensagem: 'Preencha Usuário/CPF e Senha.' });
   }
@@ -270,15 +131,15 @@ app.post('/api/login', async (req, res) => {
   const termoLimpo = String(identificador).trim().toLowerCase();
   const cpfApenasNumeros = termoLimpo.replace(/\D/g, '');
 
-  try {
-    const rows = await executarQuery(
-      `SELECT id, nome, cpf, usuario, senha_hash, perfil 
-       FROM usuarios 
-       WHERE LOWER(usuario) = ? OR cpf = ? OR (cpf IS NOT NULL AND cpf != '' AND cpf = ?)`,
-      [termoLimpo, termoLimpo, cpfApenasNumeros]
-    );
+  const query = `
+    SELECT id, nome, cpf, usuario, senha_hash, perfil 
+    FROM usuarios 
+    WHERE LOWER(usuario) = ? OR cpf = ? OR (cpf IS NOT NULL AND cpf != '' AND cpf = ?)
+  `;
+  
+  db.get(query, [termoLimpo, termoLimpo, cpfApenasNumeros], (err, usuario) => {
+    if (err) return res.status(500).json({ sucesso: false, mensagem: 'Erro interno no banco de dados.' });
 
-    const usuario = rows[0];
     if (!usuario || usuario.senha_hash !== String(senha).trim()) {
       return res.status(401).json({ sucesso: false, mensagem: 'Usuário/CPF ou senha incorretos.' });
     }
@@ -295,163 +156,135 @@ app.post('/api/login', async (req, res) => {
       token,
       usuario: { id: usuario.id, nome: usuario.nome, usuario: usuario.usuario, perfil: usuario.perfil }
     });
-  } catch (err) {
-    return res.status(500).json({ sucesso: false, mensagem: 'Erro interno no banco.' });
-  }
+  });
 });
 
 /* ==========================================
-   2. GESTÃO DE USUÁRIOS
+   2. GESTÃO DE USUÁRIOS (CRUD)
    ========================================== */
 
-app.get('/api/usuarios', async (req, res) => {
-  try {
-    const rows = await executarQuery(`SELECT id, nome, usuario, cpf, perfil FROM usuarios ORDER BY id DESC`);
+app.get('/api/usuarios', (req, res) => {
+  const query = `SELECT id, nome, usuario, cpf, perfil FROM usuarios ORDER BY id DESC`;
+  db.all(query, [], (err, rows) => {
+    if (err) return res.status(500).json({ sucesso: false, mensagem: err.message });
     res.json(rows || []);
-  } catch (err) {
-    res.status(500).json({ sucesso: false, mensagem: err.message });
-  }
+  });
 });
 
-app.post('/api/usuarios', async (req, res) => {
+app.post('/api/usuarios', (req, res) => {
   const { nome, usuario, cpf, senha_hash, perfil } = req.body;
+
   if (!nome || !usuario || !senha_hash) {
     return res.status(400).json({ sucesso: false, mensagem: 'Nome, usuário e senha são obrigatórios.' });
   }
 
   const userLimpo = String(usuario).trim().toLowerCase();
-  const cpfLimpo = cpf && String(cpf).trim() !== '' ? String(cpf).replace(/\D/g, '') : null;
+  const cpfLimpo = (cpf && String(cpf).trim() !== '') ? String(cpf).replace(/\D/g, '') : null;
 
-  try {
-    await executarQuery(
-      `INSERT INTO usuarios (nome, usuario, cpf, senha_hash, perfil) VALUES (?, ?, ?, ?, ?)`,
-      [nome.trim(), userLimpo, cpfLimpo, senha_hash.trim(), perfil || 'USUARIO']
-    );
-    res.status(201).json({ sucesso: true, mensagem: 'Usuário cadastrado com sucesso!' });
-  } catch (err) {
-    if (err.message.includes('UNIQUE') || err.message.includes('unique')) {
-      return res.status(400).json({ sucesso: false, mensagem: 'Nome de usuário ou CPF já cadastrado.' });
+  const sql = `
+    INSERT INTO usuarios (nome, usuario, cpf, senha_hash, perfil)
+    VALUES (?, ?, ?, ?, ?)
+  `;
+
+  db.run(sql, [nome.trim(), userLimpo, cpfLimpo, senha_hash.trim(), perfil || 'USUARIO'], function(err) {
+    if (err) {
+      if (err.message.includes('UNIQUE')) {
+        return res.status(400).json({ sucesso: false, mensagem: 'Nome de usuário ou CPF já cadastrado.' });
+      }
+      return res.status(500).json({ sucesso: false, mensagem: err.message });
     }
-    res.status(500).json({ sucesso: false, mensagem: err.message });
-  }
+    res.status(201).json({ sucesso: true, mensagem: 'Usuário cadastrado com sucesso!', id: this.lastID });
+  });
 });
 
-app.delete('/api/usuarios/:id', async (req, res) => {
+app.delete('/api/usuarios/:id', (req, res) => {
   const { id } = req.params;
-  try {
-    const rows = await executarQuery(`SELECT usuario FROM usuarios WHERE id = ?`, [id]);
-    const u = rows[0];
 
+  db.get(`SELECT usuario, perfil FROM usuarios WHERE id = ?`, [id], (err, u) => {
+    if (err) return res.status(500).json({ sucesso: false, mensagem: err.message });
     if (!u) return res.status(404).json({ sucesso: false, mensagem: 'Usuário não encontrado.' });
 
     const PROTECTED_USERS = ['monstro', 'monstrobr', 'rasmadmin'];
+
     if (PROTECTED_USERS.includes(u.usuario.toLowerCase())) {
-      return res.status(403).json({
-        sucesso: false,
-        mensagem: `Ação negada: O usuário administrador (${u.usuario}) é protegido!`
+      return res.status(403).json({ 
+        sucesso: false, 
+        mensagem: `Ação negada: O usuário administrador geral (${u.usuario}) é protegido!` 
       });
     }
 
-    await executarQuery(`DELETE FROM usuarios WHERE id = ?`, [id]);
-    res.json({ sucesso: true, mensagem: 'Usuário excluído com sucesso!' });
-  } catch (err) {
-    res.status(500).json({ sucesso: false, mensagem: err.message });
-  }
+    db.run(`DELETE FROM usuarios WHERE id = ?`, [id], function(err) {
+      if (err) return res.status(500).json({ sucesso: false, mensagem: err.message });
+      res.json({ sucesso: true, mensagem: 'Usuário excluído com sucesso!' });
+    });
+  });
 });
 
 /* ==========================================
-   3. OPERAÇÕES DA GRADE HORÁRIA E ALOCAÇÕES
+   3. CONSULTAS DA GRADE HORÁRIA E ALOCAÇÕES
    ========================================== */
 
-app.get('/api/turmas', async (req, res) => {
-  try {
-    const rows = await executarQuery(`
-      SELECT t.id, t.nome_descricao, COALESCE(tu.codigo, 'N/A') AS turno_codigo, COALESCE(tu.nome, 'GERAL') AS turno_nome 
-      FROM turmas t 
-      LEFT JOIN turnos tu ON t.turno_id = tu.id 
-      ORDER BY t.id ASC
-    `);
-    res.json(rows || []);
-  } catch (err) {
-    res.json([]);
-  }
+app.get('/api/turmas', (req, res) => {
+  const query = `
+    SELECT t.id, t.nome_descricao, tu.codigo AS turno_codigo, tu.nome AS turno_nome 
+    FROM turmas t JOIN turnos tu ON t.turno_id = tu.id ORDER BY t.id ASC
+  `;
+  db.all(query, [], (err, rows) => res.json(rows || []));
 });
 
-app.get('/api/alocacoes', async (req, res) => {
-  try {
-    const rows = await executarQuery(`
-      SELECT a.id AS alocacao_id, a.turma_id, d.nome AS disciplina_nome, COALESCE(p.nome, 'A DEFINIR') AS professor_nome, a.tipo
-      FROM alocacoes a
-      LEFT JOIN disciplinas d ON a.disciplina_id = d.id
-      LEFT JOIN professores p ON a.professor_id = p.id
-    `);
-    res.json(rows || []);
-  } catch (err) {
-    res.json([]);
-  }
+app.get('/api/alocacoes', (req, res) => {
+  const query = `
+    SELECT a.id AS alocacao_id, a.turma_id, d.nome AS disciplina_nome, COALESCE(p.nome, 'A DEFINIR') AS professor_nome, a.tipo
+    FROM alocacoes a
+    LEFT JOIN disciplinas d ON a.disciplina_id = d.id
+    LEFT JOIN professores p ON a.professor_id = p.id
+  `;
+  db.all(query, [], (err, rows) => res.json(rows || []));
 });
 
-app.get('/api/grade', async (req, res) => {
-  try {
-    const rows = await executarQuery(`
-      SELECT g.id, g.turma_id, g.dia_semana, g.num_aula, g.alocacao_id, d.nome AS disciplina_nome, COALESCE(p.nome, 'A DEFINIR') AS professor_nome, a.tipo
-      FROM grade_horaria g
-      JOIN alocacoes a ON g.alocacao_id = a.id
-      JOIN disciplinas d ON a.disciplina_id = d.id
-      LEFT JOIN professores p ON a.professor_id = p.id
-    `);
-    res.json(rows || []);
-  } catch (err) {
-    res.json([]);
-  }
+app.get('/api/grade', (req, res) => {
+  const query = `
+    SELECT g.id, g.turma_id, g.dia_semana, g.num_aula, g.alocacao_id, d.nome AS disciplina_nome, COALESCE(p.nome, 'A DEFINIR') AS professor_nome, a.tipo
+    FROM grade_horaria g
+    JOIN alocacoes a ON g.alocacao_id = a.id
+    JOIN disciplinas d ON a.disciplina_id = d.id
+    LEFT JOIN professores p ON a.professor_id = p.id
+  `;
+  db.all(query, [], (err, rows) => res.json(rows || []));
 });
 
-app.post('/api/grade', async (req, res) => {
+app.post('/api/grade', (req, res) => {
   const { turma_id, dia_semana, num_aula, alocacao_id } = req.body;
-  try {
-    if (isPostgres) {
-      await executarQuery(
-        `INSERT INTO grade_horaria (turma_id, dia_semana, num_aula, alocacao_id)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT (turma_id, dia_semana, num_aula) DO UPDATE SET alocacao_id = EXCLUDED.alocacao_id`,
-        [turma_id, dia_semana, num_aula, alocacao_id]
-      );
-    } else {
-      await executarQuery(
-        `INSERT INTO grade_horaria (turma_id, dia_semana, num_aula, alocacao_id)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT(turma_id, dia_semana, num_aula) DO UPDATE SET alocacao_id = excluded.alocacao_id`,
-        [turma_id, dia_semana, num_aula, alocacao_id]
-      );
-    }
-    res.status(200).json({ mensagem: 'Sucesso' });
-  } catch (err) {
-    res.status(500).json({ mensagem: err.message });
-  }
+  const sql = `
+    INSERT INTO grade_horaria (turma_id, dia_semana, num_aula, alocacao_id)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(turma_id, dia_semana, num_aula) DO UPDATE SET alocacao_id = excluded.alocacao_id
+  `;
+  db.run(sql, [turma_id, dia_semana, num_aula, alocacao_id], function(err) {
+    if (err) return res.status(500).json({ mensagem: err.message });
+    res.status(200).json({ mensagem: 'Sucesso', id: this.lastID });
+  });
 });
 
-app.delete('/api/grade', async (req, res) => {
+app.delete('/api/grade', (req, res) => {
   const { turma_id, dia_semana, num_aula } = req.body;
-  try {
-    await executarQuery(`DELETE FROM grade_horaria WHERE turma_id = ? AND dia_semana = ? AND num_aula = ?`, [
-      turma_id,
-      dia_semana,
-      num_aula
-    ]);
+  const sql = `DELETE FROM grade_horaria WHERE turma_id = ? AND dia_semana = ? AND num_aula = ?`;
+  db.run(sql, [turma_id, dia_semana, num_aula], function(err) {
+    if (err) return res.status(500).json({ mensagem: err.message });
     res.status(200).json({ mensagem: 'Aula removida' });
-  } catch (err) {
-    res.status(500).json({ mensagem: err.message });
-  }
+  });
 });
 
 /* ==========================================
-   4. NAVEGAÇÃO E PÁGINAS
+   4. ROTAS DE PÁGINAS E NAVEGAÇÃO
    ========================================== */
 
 app.get('/login', (req, res) => res.sendFile(path.join(FRONTEND_PATH, 'login.html')));
 app.get('/login.html', (req, res) => res.sendFile(path.join(FRONTEND_PATH, 'login.html')));
+
 app.get('/usuarios', (req, res) => res.sendFile(path.join(FRONTEND_PATH, 'usuarios.html')));
 app.get('/usuarios.html', (req, res) => res.sendFile(path.join(FRONTEND_PATH, 'usuarios.html')));
+
 app.get('/', (req, res) => res.sendFile(path.join(FRONTEND_PATH, 'index.html')));
 app.get('/index.html', (req, res) => res.sendFile(path.join(FRONTEND_PATH, 'index.html')));
 

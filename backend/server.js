@@ -82,7 +82,7 @@ async function executarQuery(sql, params = []) {
 }
 
 /* ==========================================================================
-   2. MIGRATIONS, TABELAS E IMPORTAÇÃO NATIVA DO EXCEL
+   2. MIGRATIONS, TABELAS E CARGA INICIAL
    ========================================================================== */
 
 async function garantirEstruturaPostgres() {
@@ -139,7 +139,7 @@ async function garantirEstruturaPostgres() {
     `);
     console.log('✅ Estrutura de tabelas validada no PostgreSQL.');
     await povoarUsuariosIniciais();
-    await importarPlanilhaNativa();
+    await processarETLPlanilha(false); // Executa verificação suave no boot
   } catch (err) {
     console.error('❌ Erro na estrutura do Postgres:', err.message);
   }
@@ -204,7 +204,7 @@ function garantirEstruturaSqlite() {
   sqliteDb.exec(sql, (err) => {
     if (!err) {
       povoarUsuariosIniciais();
-      importarPlanilhaNativa();
+      processarETLPlanilha(false);
     }
   });
 }
@@ -236,31 +236,32 @@ async function povoarUsuariosIniciais() {
 }
 
 /**
- * Módulo ETL Nativo: Lê o arquivo backend/data/professores.xlsx na inicialização
- * e popula o PostgreSQL apenas se a tabela alocacoes estiver vazia.
+ * Função de Processamento ETL - Lê a Planilha Excel
  */
-async function importarPlanilhaNativa() {
+async function processarETLPlanilha(forcarSobrescrita = false) {
   try {
-    const qtdAlocacoes = await executarQuery(`SELECT COUNT(*) AS qtd FROM alocacoes`);
-    const total = parseInt(qtdAlocacoes[0]?.qtd || qtdAlocacoes[0]?.count || 0);
+    if (!forcarSobrescrita) {
+      const qtdAlocacoes = await executarQuery(`SELECT COUNT(*) AS qtd FROM alocacoes`);
+      const total = parseInt(qtdAlocacoes[0]?.qtd || qtdAlocacoes[0]?.count || 0);
 
-    if (total > 0) {
-      console.log(`ℹ️ Banco já possui ${total} alocações. Carga da planilha ignorada para preservar edições.`);
-      return;
+      if (total > 0) {
+        console.log(`ℹ️ Base de dados já populada (${total} registros). ETL automático suspenso.`);
+        return { sucesso: true, mensagem: 'Base já possui dados.', total };
+      }
     }
 
     const excelPath = path.join(__dirname, 'data', 'professores.xlsx');
     if (!fs.existsSync(excelPath)) {
-      console.log('⚠️ Arquivo backend/data/professores.xlsx não encontrado.');
-      return;
+      console.log(`⚠️ Arquivo não encontrado em: ${excelPath}`);
+      return { sucesso: false, mensagem: `Arquivo de planilha não encontrado em ${excelPath}` };
     }
 
-    console.log(`📖 Lendo planilha nativa: ${excelPath}`);
+    console.log(`📖 Lendo planilha em: ${excelPath}`);
     const workbook = xlsx.readFile(excelPath);
     const sheetName = workbook.SheetNames[0];
     const rows = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' });
 
-    console.log(`📦 Processando ETL em lote (${rows.length} linhas)...`);
+    console.log(`📦 Processando ETL de ${rows.length} linhas da planilha...`);
 
     const mapaTurnos = { 'A': 'MATUTINO', 'B': 'VESPERTINO', 'C': 'NOTURNO' };
     let inseridos = 0;
@@ -331,7 +332,7 @@ async function importarPlanilhaNativa() {
         );
         profId = resProf.rows[0].id;
       } else {
-        await executarQuery(`INSERT OR IGNORE INTO professores (nome) VALUES (?)`, [finalProf]);
+        await executarQuery(`INSERT OR IGNORE INTO professores (nome) VALUES (?, ?)`, [finalProf]);
         const resProf = await executarQuery(`SELECT id FROM professores WHERE nome = ?`, [finalProf]);
         if (resProf.length > 0) profId = resProf[0].id;
       }
@@ -345,15 +346,23 @@ async function importarPlanilhaNativa() {
       inseridos++;
     }
 
-    console.log(`✅ ETL Concluído com sucesso! ${inseridos} alocações reais importadas da planilha.`);
+    console.log(`✅ ETL concluído com sucesso: ${inseridos} alocações gravadas.`);
+    return { sucesso: true, inseridos };
   } catch (err) {
-    console.error('❌ Erro na importação nativa da planilha:', err.message);
+    console.error('❌ Erro durante o ETL da planilha:', err.message);
+    return { sucesso: false, mensagem: err.message };
   }
 }
 
 /* ==========================================================================
-   3. ROTAS DE AUTENTICAÇÃO, USUÁRIOS E GRADE
+   3. ROTAS DE API
    ========================================================================== */
+
+// Rota de Gatilho Manual de Importação
+app.all('/api/rodar-etl-planilha', async (req, res) => {
+  const resultado = await processarETLPlanilha(true);
+  res.json(resultado);
+});
 
 app.post('/api/login', async (req, res) => {
   const { identificador, senha } = req.body;

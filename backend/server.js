@@ -139,7 +139,6 @@ async function garantirEstruturaPostgres() {
     `);
     console.log('✅ Estrutura de tabelas validada no PostgreSQL.');
     await povoarUsuariosIniciais();
-    await processarETLPlanilha(false); // Executa verificação suave no boot
   } catch (err) {
     console.error('❌ Erro na estrutura do Postgres:', err.message);
   }
@@ -204,7 +203,6 @@ function garantirEstruturaSqlite() {
   sqliteDb.exec(sql, (err) => {
     if (!err) {
       povoarUsuariosIniciais();
-      processarETLPlanilha(false);
     }
   });
 }
@@ -236,20 +234,10 @@ async function povoarUsuariosIniciais() {
 }
 
 /**
- * Função de Processamento ETL - Lê a Planilha Excel
+ * Função de Processamento ETL - Lê a Planilha Excel e popula a base
  */
-async function processarETLPlanilha(forcarSobrescrita = false) {
+async function processarETLPlanilha() {
   try {
-    if (!forcarSobrescrita) {
-      const qtdAlocacoes = await executarQuery(`SELECT COUNT(*) AS qtd FROM alocacoes`);
-      const total = parseInt(qtdAlocacoes[0]?.qtd || qtdAlocacoes[0]?.count || 0);
-
-      if (total > 0) {
-        console.log(`ℹ️ Base de dados já populada (${total} registros). ETL automático suspenso.`);
-        return { sucesso: true, mensagem: 'Base já possui dados.', total };
-      }
-    }
-
     const excelPath = path.join(__dirname, 'data', 'professores.xlsx');
     if (!fs.existsSync(excelPath)) {
       console.log(`⚠️ Arquivo não encontrado em: ${excelPath}`);
@@ -276,68 +264,72 @@ async function processarETLPlanilha(forcarSobrescrita = false) {
 
       const turnoNome = mapaTurnos[turnoCodigoRaw] || 'NOTURNO';
 
-      // 1. Turno
-      let turnoId = 1;
+      // 1. Obter ou Criar Turno
+      let turnoId = null;
       if (isPostgres) {
-        const resT = await pgPool.query(
-          `INSERT INTO turnos (codigo, nome) VALUES ($1, $2)
-           ON CONFLICT (codigo) DO UPDATE SET nome = EXCLUDED.nome RETURNING id`,
-          [turnoCodigoRaw, turnoNome]
-        );
-        turnoId = resT.rows[0].id;
+        let resT = await pgPool.query(`SELECT id FROM turnos WHERE codigo = $1`, [turnoCodigoRaw]);
+        if (resT.rows.length > 0) {
+          turnoId = resT.rows[0].id;
+        } else {
+          resT = await pgPool.query(`INSERT INTO turnos (codigo, nome) VALUES ($1, $2) RETURNING id`, [turnoCodigoRaw, turnoNome]);
+          turnoId = resT.rows[0].id;
+        }
       } else {
         await executarQuery(`INSERT OR IGNORE INTO turnos (codigo, nome) VALUES (?, ?)`, [turnoCodigoRaw, turnoNome]);
         const resT = await executarQuery(`SELECT id FROM turnos WHERE codigo = ?`, [turnoCodigoRaw]);
         if (resT.length > 0) turnoId = resT[0].id;
       }
 
-      // 2. Turma
+      // 2. Obter ou Criar Turma
       let turmaId = null;
       if (isPostgres) {
-        const resTurma = await pgPool.query(
-          `INSERT INTO turmas (nome_descricao, turno_id) VALUES ($1, $2)
-           ON CONFLICT (nome_descricao) DO UPDATE SET turno_id = EXCLUDED.turno_id RETURNING id`,
-          [turmaDescrita, turnoId]
-        );
-        turmaId = resTurma.rows[0].id;
+        let resTurma = await pgPool.query(`SELECT id FROM turmas WHERE nome_descricao = $1`, [turmaDescrita]);
+        if (resTurma.rows.length > 0) {
+          turmaId = resTurma.rows[0].id;
+        } else {
+          resTurma = await pgPool.query(`INSERT INTO turmas (nome_descricao, turno_id) VALUES ($1, $2) RETURNING id`, [turmaDescrita, turnoId]);
+          turmaId = resTurma.rows[0].id;
+        }
       } else {
         await executarQuery(`INSERT OR IGNORE INTO turmas (nome_descricao, turno_id) VALUES (?, ?)`, [turmaDescrita, turnoId]);
         const resTurma = await executarQuery(`SELECT id FROM turmas WHERE nome_descricao = ?`, [turmaDescrita]);
         if (resTurma.length > 0) turmaId = resTurma[0].id;
       }
 
-      // 3. Disciplina
+      // 3. Obter ou Criar Disciplina
       let discId = null;
       if (isPostgres) {
-        const resDisc = await pgPool.query(
-          `INSERT INTO disciplinas (nome) VALUES ($1)
-           ON CONFLICT (nome) DO UPDATE SET nome = EXCLUDED.nome RETURNING id`,
-          [disciplinaNome]
-        );
-        discId = resDisc.rows[0].id;
+        let resDisc = await pgPool.query(`SELECT id FROM disciplinas WHERE nome = $1`, [disciplinaNome]);
+        if (resDisc.rows.length > 0) {
+          discId = resDisc.rows[0].id;
+        } else {
+          resDisc = await pgPool.query(`INSERT INTO disciplinas (nome) VALUES ($1) RETURNING id`, [disciplinaNome]);
+          discId = resDisc.rows[0].id;
+        }
       } else {
         await executarQuery(`INSERT OR IGNORE INTO disciplinas (nome) VALUES (?)`, [disciplinaNome]);
         const resDisc = await executarQuery(`SELECT id FROM disciplinas WHERE nome = ?`, [disciplinaNome]);
         if (resDisc.length > 0) discId = resDisc[0].id;
       }
 
-      // 4. Professor
+      // 4. Obter ou Criar Professor
       let profId = null;
       const finalProf = professorNome !== '' ? professorNome : 'A DEFINIR';
       if (isPostgres) {
-        const resProf = await pgPool.query(
-          `INSERT INTO professores (nome) VALUES ($1)
-           ON CONFLICT (nome) DO UPDATE SET nome = EXCLUDED.nome RETURNING id`,
-          [finalProf]
-        );
-        profId = resProf.rows[0].id;
+        let resProf = await pgPool.query(`SELECT id FROM professores WHERE nome = $1`, [finalProf]);
+        if (resProf.rows.length > 0) {
+          profId = resProf.rows[0].id;
+        } else {
+          resProf = await pgPool.query(`INSERT INTO professores (nome) VALUES ($1) RETURNING id`, [finalProf]);
+          profId = resProf.rows[0].id;
+        }
       } else {
-        await executarQuery(`INSERT OR IGNORE INTO professores (nome) VALUES (?, ?)`, [finalProf]);
+        await executarQuery(`INSERT OR IGNORE INTO professores (nome) VALUES (?)`, [finalProf]);
         const resProf = await executarQuery(`SELECT id FROM professores WHERE nome = ?`, [finalProf]);
         if (resProf.length > 0) profId = resProf[0].id;
       }
 
-      // 5. Alocação
+      // 5. Inserir Alocação
       await executarQuery(
         `INSERT INTO alocacoes (turma_id, disciplina_id, professor_id, tipo) VALUES (?, ?, ?, ?)`,
         [turmaId, discId, profId, 'INDIVIDUAL']
@@ -358,9 +350,9 @@ async function processarETLPlanilha(forcarSobrescrita = false) {
    3. ROTAS DE API
    ========================================================================== */
 
-// Rota de Gatilho Manual de Importação
+// Rota de Gatilho Manual para Importar a Planilha
 app.all('/api/rodar-etl-planilha', async (req, res) => {
-  const resultado = await processarETLPlanilha(true);
+  const resultado = await processarETLPlanilha();
   res.json(resultado);
 });
 

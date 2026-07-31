@@ -1,6 +1,8 @@
 /**
- * SERVER.JS - API REST Express / PostgreSQL (Com fallback SQLite local)
- * Arquitetura: Clean Code / REST API Persistente
+ * SERVER.JS - API REST Express / PostgreSQL & SQLite
+ * Sistema de Gestão de Grade Horária e Alocação Escolar (EJA / CEEBJA)
+ * 
+ * Arquitetura: Clean Architecture / REST API Persistente / Multi-Database
  * Desenvolvido por RASM Tecnologia
  */
 
@@ -9,6 +11,7 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const jwt = require('jsonwebtoken');
+const xlsx = require('xlsx');
 const { Pool } = require('pg');
 const sqlite3 = require('sqlite3').verbose();
 
@@ -17,15 +20,15 @@ const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'ceebja_chave_secreta_super_segura_2026';
 
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 const FRONTEND_PATH = path.join(__dirname, '..', 'frontend');
 app.use(express.static(FRONTEND_PATH));
 
-/* ==========================================
-   CONFIGURAÇÃO DE BANCO DE DADOS (POSTGRES / SQLITE)
-   ========================================== */
+/* ==========================================================================
+   1. BANCO DE DADOS (POSTGRESQL / SQLITE FALLBACK)
+   ========================================================================== */
 
 const DATABASE_URL = process.env.DATABASE_URL;
 let isPostgres = false;
@@ -38,20 +41,25 @@ if (DATABASE_URL) {
     connectionString: DATABASE_URL,
     ssl: { rejectUnauthorized: false }
   });
-  console.log('⚡ Conectado ao banco POSTGRESQL (Dados Persistentes Ativados!)');
+  console.log('⚡ Conectado ao PostgreSQL Persistente do Render.');
   garantirEstruturaPostgres();
 } else {
-  console.log('⚠️ Rodando com SQLite Local (Uso em Desenvolvimento)');
-  const DB_PATH = path.join(__dirname, 'database', 'grade_horaria.db');
-  if (!fs.existsSync(path.join(__dirname, 'database'))) {
-    fs.mkdirSync(path.join(__dirname, 'database'), { recursive: true });
+  console.log('⚠️ Rodando com SQLite Local (Modo Desenvolvimento)');
+  const DB_DIR = path.join(__dirname, 'database');
+  const DB_PATH = path.join(DB_DIR, 'grade_horaria.db');
+
+  if (!fs.existsSync(DB_DIR)) {
+    fs.mkdirSync(DB_DIR, { recursive: true });
   }
+
   sqliteDb = new sqlite3.Database(DB_PATH, (err) => {
-    if (!err) garantirEstruturaSqlite();
+    if (!err) {
+      console.log('✅ Banco SQLite local carregado.');
+      garantirEstruturaSqlite();
+    }
   });
 }
 
-// Executor universal de queries com bind seguro de parâmetros
 async function executarQuery(sql, params = []) {
   if (isPostgres) {
     let contador = 1;
@@ -60,7 +68,8 @@ async function executarQuery(sql, params = []) {
     return res.rows;
   } else {
     return new Promise((resolve, reject) => {
-      if (sql.trim().toUpperCase().startsWith('SELECT')) {
+      const sqlTrim = sql.trim().toUpperCase();
+      if (sqlTrim.startsWith('SELECT')) {
         sqliteDb.all(sql, params, (err, rows) => (err ? reject(err) : resolve(rows || [])));
       } else {
         sqliteDb.run(sql, params, function (err) {
@@ -72,9 +81,9 @@ async function executarQuery(sql, params = []) {
   }
 }
 
-/* ==========================================
-   MIGRATIONS E CARGA INICIAL (SAFE SEED)
-   ========================================== */
+/* ==========================================================================
+   2. MIGRATIONS, TABELAS E IMPORTAÇÃO NATIVA DO EXCEL
+   ========================================================================== */
 
 async function garantirEstruturaPostgres() {
   try {
@@ -97,7 +106,7 @@ async function garantirEstruturaPostgres() {
 
       CREATE TABLE IF NOT EXISTS turmas (
         id SERIAL PRIMARY KEY,
-        nome_descricao VARCHAR(255) NOT NULL,
+        nome_descricao VARCHAR(255) UNIQUE NOT NULL,
         turno_id INT REFERENCES turnos(id) ON DELETE SET NULL
       );
 
@@ -108,7 +117,7 @@ async function garantirEstruturaPostgres() {
 
       CREATE TABLE IF NOT EXISTS professores (
         id SERIAL PRIMARY KEY,
-        nome VARCHAR(255) NOT NULL
+        nome VARCHAR(255) UNIQUE NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS alocacoes (
@@ -128,11 +137,11 @@ async function garantirEstruturaPostgres() {
         CONSTRAINT uq_grade UNIQUE(turma_id, dia_semana, num_aula)
       );
     `);
-    console.log('✅ Tabelas no PostgreSQL validadas com sucesso!');
+    console.log('✅ Estrutura de tabelas validada no PostgreSQL.');
     await povoarUsuariosIniciais();
-    await povoarEstruturaEjaInicial();
+    await importarPlanilhaNativa();
   } catch (err) {
-    console.error('❌ Erro ao criar estrutura no Postgres:', err.message);
+    console.error('❌ Erro na estrutura do Postgres:', err.message);
   }
 }
 
@@ -147,21 +156,68 @@ function garantirEstruturaSqlite() {
       perfil TEXT DEFAULT 'USUARIO',
       criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS turnos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      codigo TEXT UNIQUE NOT NULL,
+      nome TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS turmas (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nome_descricao TEXT UNIQUE NOT NULL,
+      turno_id INTEGER,
+      FOREIGN KEY(turno_id) REFERENCES turnos(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS disciplinas (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nome TEXT UNIQUE NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS professores (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nome TEXT UNIQUE NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS alocacoes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      turma_id INTEGER,
+      disciplina_id INTEGER,
+      professor_id INTEGER,
+      tipo TEXT DEFAULT 'INDIVIDUAL',
+      FOREIGN KEY(turma_id) REFERENCES turmas(id),
+      FOREIGN KEY(disciplina_id) REFERENCES disciplinas(id),
+      FOREIGN KEY(professor_id) REFERENCES professores(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS grade_horaria (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      turma_id INTEGER NOT NULL,
+      dia_semana INTEGER NOT NULL,
+      num_aula INTEGER NOT NULL,
+      alocacao_id INTEGER NOT NULL,
+      UNIQUE(turma_id, dia_semana, num_aula)
+    );
   `;
-  sqliteDb.run(sql, () => {
-    povoarUsuariosIniciais();
+
+  sqliteDb.exec(sql, (err) => {
+    if (!err) {
+      povoarUsuariosIniciais();
+      importarPlanilhaNativa();
+    }
   });
 }
 
 async function povoarUsuariosIniciais() {
-  const usuarios = [
+  const usuariosBase = [
     ['Administrador Geral (Monstro)', 'monstro', '11111111111', 'monstro2026', 'ADMINISTRADOR'],
     ['Administrador do Sistema', 'admin', '00000000000', 'admin123', 'ADMINISTRADOR'],
     ['Equipe Pedagógica', 'pedagogico', '22222222222', 'pedagogico123', 'PEDAGOGICO'],
     ['Visualizador (Somente Leitura)', 'consulta', '33333333333', 'consulta123', 'CONSULTA']
   ];
 
-  for (const u of usuarios) {
+  for (const u of usuariosBase) {
     try {
       if (isPostgres) {
         await pgPool.query(
@@ -175,97 +231,133 @@ async function povoarUsuariosIniciais() {
           u
         );
       }
-    } catch (e) {}
+    } catch (err) {}
   }
-  console.log('🌱 Usuários base validados no banco.');
 }
 
 /**
- * Povoa o esqueleto de Turnos, Turmas, Disciplinas e Alocações da EJA
- * Apenas se as tabelas estiverem totalmente vazias (preserva qualquer dado existente)
+ * Módulo ETL Nativo: Lê o arquivo backend/data/professores.xlsx na inicialização
+ * e popula o PostgreSQL apenas se a tabela alocacoes estiver vazia.
  */
-async function povoarEstruturaEjaInicial() {
-  if (!isPostgres) return;
-
+async function importarPlanilhaNativa() {
   try {
-    const qtdTurmas = await pgPool.query(`SELECT COUNT(*) FROM turmas`);
-    if (parseInt(qtdTurmas.rows[0].count) > 0) {
-      console.log('ℹ️ Base de turmas já possui dados. Carga inicial ignorada para preservar edições.');
+    const qtdAlocacoes = await executarQuery(`SELECT COUNT(*) AS qtd FROM alocacoes`);
+    const total = parseInt(qtdAlocacoes[0]?.qtd || qtdAlocacoes[0]?.count || 0);
+
+    if (total > 0) {
+      console.log(`ℹ️ Banco já possui ${total} alocações. Carga da planilha ignorada para preservar edições.`);
       return;
     }
 
-    // 1. Inserir Turnos Padronizados da EJA
-    await pgPool.query(`
-      INSERT INTO turnos (id, codigo, nome) VALUES 
-      (1, 'M', 'MATUTINO'),
-      (2, 'V', 'VESPERTINO'),
-      (3, 'N', 'NOTURNO')
-      ON CONFLICT (codigo) DO NOTHING;
-    `);
+    const excelPath = path.join(__dirname, 'data', 'professores.xlsx');
+    if (!fs.existsSync(excelPath)) {
+      console.log('⚠️ Arquivo backend/data/professores.xlsx não encontrado.');
+      return;
+    }
 
-    // 2. Inserir Turmas Iniciais CEEBJA / EJA
-    await pgPool.query(`
-      INSERT INTO turmas (id, nome_descricao, turno_id) VALUES 
-      (1, 'EJA F1 - Ensino Fundamental Fase I (Manhã)', 1),
-      (2, 'EJA F2 - Ensino Fundamental Fase II (Manhã)', 1),
-      (3, 'EJA M1 - Ensino Médio Bloco I (Noite)', 3),
-      (4, 'EJA M2 - Ensino Médio Bloco II (Noite)', 3)
-      ON CONFLICT DO NOTHING;
-    `);
+    console.log(`📖 Lendo planilha nativa: ${excelPath}`);
+    const workbook = xlsx.readFile(excelPath);
+    const sheetName = workbook.SheetNames[0];
+    const rows = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' });
 
-    // 3. Disciplinas da Base Nacional Comum EJA Paraná
-    await pgPool.query(`
-      INSERT INTO disciplinas (id, nome) VALUES 
-      (1, 'Língua Portuguesa'),
-      (2, 'Matemática'),
-      (3, 'História'),
-      (4, 'Geografia'),
-      (5, 'Biologia / Ciências'),
-      (6, 'Física'),
-      (7, 'Química'),
-      (8, 'Inglês'),
-      (9, 'Arte'),
-      (10, 'Educação Física')
-      ON CONFLICT (nome) DO NOTHING;
-    `);
+    console.log(`📦 Processando ETL em lote (${rows.length} linhas)...`);
 
-    // 4. Professor Genérico Inicial (Você poderá renomear na interface/planilha)
-    await pgPool.query(`
-      INSERT INTO professores (id, nome) VALUES 
-      (1, 'A DEFINIR / A ALOCAR')
-      ON CONFLICT DO NOTHING;
-    `);
+    const mapaTurnos = { 'A': 'MATUTINO', 'B': 'VESPERTINO', 'C': 'NOTURNO' };
+    let inseridos = 0;
 
-    // 5. Alocações Base
-    await pgPool.query(`
-      INSERT INTO alocacoes (turma_id, disciplina_id, professor_id, tipo) VALUES 
-      (1, 1, 1, 'INDIVIDUAL'),
-      (1, 2, 1, 'INDIVIDUAL'),
-      (2, 1, 1, 'INDIVIDUAL'),
-      (2, 2, 1, 'INDIVIDUAL'),
-      (3, 1, 1, 'INDIVIDUAL'),
-      (3, 2, 1, 'INDIVIDUAL'),
-      (3, 6, 1, 'INDIVIDUAL'),
-      (4, 2, 1, 'INDIVIDUAL'),
-      (4, 7, 1, 'INDIVIDUAL')
-      ON CONFLICT DO NOTHING;
-    `);
+    for (const row of rows) {
+      const turmaDescrita = String(row['TURMA DESCRITA'] || row['turma descrita'] || '').trim();
+      const disciplinaNome = String(row['DISCIPLINA'] || row['disciplina'] || '').trim();
+      const turnoCodigoRaw = String(row['TURMA'] || row['turma'] || 'C').trim().toUpperCase();
+      const professorNome = String(row['NOME SUPRIDO'] || row['nome suprido'] || 'A DEFINIR').trim();
 
-    console.log('✅ Carga inicial da estrutura EJA/CEEBJA concluída com sucesso!');
+      if (!turmaDescrita || !disciplinaNome) continue;
+
+      const turnoNome = mapaTurnos[turnoCodigoRaw] || 'NOTURNO';
+
+      // 1. Turno
+      let turnoId = 1;
+      if (isPostgres) {
+        const resT = await pgPool.query(
+          `INSERT INTO turnos (codigo, nome) VALUES ($1, $2)
+           ON CONFLICT (codigo) DO UPDATE SET nome = EXCLUDED.nome RETURNING id`,
+          [turnoCodigoRaw, turnoNome]
+        );
+        turnoId = resT.rows[0].id;
+      } else {
+        await executarQuery(`INSERT OR IGNORE INTO turnos (codigo, nome) VALUES (?, ?)`, [turnoCodigoRaw, turnoNome]);
+        const resT = await executarQuery(`SELECT id FROM turnos WHERE codigo = ?`, [turnoCodigoRaw]);
+        if (resT.length > 0) turnoId = resT[0].id;
+      }
+
+      // 2. Turma
+      let turmaId = null;
+      if (isPostgres) {
+        const resTurma = await pgPool.query(
+          `INSERT INTO turmas (nome_descricao, turno_id) VALUES ($1, $2)
+           ON CONFLICT (nome_descricao) DO UPDATE SET turno_id = EXCLUDED.turno_id RETURNING id`,
+          [turmaDescrita, turnoId]
+        );
+        turmaId = resTurma.rows[0].id;
+      } else {
+        await executarQuery(`INSERT OR IGNORE INTO turmas (nome_descricao, turno_id) VALUES (?, ?)`, [turmaDescrita, turnoId]);
+        const resTurma = await executarQuery(`SELECT id FROM turmas WHERE nome_descricao = ?`, [turmaDescrita]);
+        if (resTurma.length > 0) turmaId = resTurma[0].id;
+      }
+
+      // 3. Disciplina
+      let discId = null;
+      if (isPostgres) {
+        const resDisc = await pgPool.query(
+          `INSERT INTO disciplinas (nome) VALUES ($1)
+           ON CONFLICT (nome) DO UPDATE SET nome = EXCLUDED.nome RETURNING id`,
+          [disciplinaNome]
+        );
+        discId = resDisc.rows[0].id;
+      } else {
+        await executarQuery(`INSERT OR IGNORE INTO disciplinas (nome) VALUES (?)`, [disciplinaNome]);
+        const resDisc = await executarQuery(`SELECT id FROM disciplinas WHERE nome = ?`, [disciplinaNome]);
+        if (resDisc.length > 0) discId = resDisc[0].id;
+      }
+
+      // 4. Professor
+      let profId = null;
+      const finalProf = professorNome !== '' ? professorNome : 'A DEFINIR';
+      if (isPostgres) {
+        const resProf = await pgPool.query(
+          `INSERT INTO professores (nome) VALUES ($1)
+           ON CONFLICT (nome) DO UPDATE SET nome = EXCLUDED.nome RETURNING id`,
+          [finalProf]
+        );
+        profId = resProf.rows[0].id;
+      } else {
+        await executarQuery(`INSERT OR IGNORE INTO professores (nome) VALUES (?)`, [finalProf]);
+        const resProf = await executarQuery(`SELECT id FROM professores WHERE nome = ?`, [finalProf]);
+        if (resProf.length > 0) profId = resProf[0].id;
+      }
+
+      // 5. Alocação
+      await executarQuery(
+        `INSERT INTO alocacoes (turma_id, disciplina_id, professor_id, tipo) VALUES (?, ?, ?, ?)`,
+        [turmaId, discId, profId, 'INDIVIDUAL']
+      );
+
+      inseridos++;
+    }
+
+    console.log(`✅ ETL Concluído com sucesso! ${inseridos} alocações reais importadas da planilha.`);
   } catch (err) {
-    console.error('⚠️ Aviso na carga inicial da EJA:', err.message);
+    console.error('❌ Erro na importação nativa da planilha:', err.message);
   }
 }
 
-/* ==========================================
-   1. AUTENTICAÇÃO E LOGIN
-   ========================================== */
+/* ==========================================================================
+   3. ROTAS DE AUTENTICAÇÃO, USUÁRIOS E GRADE
+   ========================================================================== */
 
 app.post('/api/login', async (req, res) => {
   const { identificador, senha } = req.body;
-  if (!identificador || !senha) {
-    return res.status(400).json({ sucesso: false, mensagem: 'Preencha Usuário/CPF e Senha.' });
-  }
+  if (!identificador || !senha) return res.status(400).json({ sucesso: false, mensagem: 'Informe Usuário/CPF e Senha.' });
 
   const termoLimpo = String(identificador).trim().toLowerCase();
   const cpfApenasNumeros = termoLimpo.replace(/\D/g, '');
@@ -273,8 +365,7 @@ app.post('/api/login', async (req, res) => {
   try {
     const rows = await executarQuery(
       `SELECT id, nome, cpf, usuario, senha_hash, perfil 
-       FROM usuarios 
-       WHERE LOWER(usuario) = ? OR cpf = ? OR (cpf IS NOT NULL AND cpf != '' AND cpf = ?)`,
+       FROM usuarios WHERE LOWER(usuario) = ? OR cpf = ? OR (cpf IS NOT NULL AND cpf != '' AND cpf = ?)`,
       [termoLimpo, termoLimpo, cpfApenasNumeros]
     );
 
@@ -289,92 +380,27 @@ app.post('/api/login', async (req, res) => {
       { expiresIn: '8h' }
     );
 
-    return res.status(200).json({
-      sucesso: true,
-      mensagem: 'Sucesso!',
-      token,
-      usuario: { id: usuario.id, nome: usuario.nome, usuario: usuario.usuario, perfil: usuario.perfil }
-    });
+    return res.json({ sucesso: true, token, usuario: { id: usuario.id, nome: usuario.nome, usuario: usuario.usuario, perfil: usuario.perfil } });
   } catch (err) {
-    return res.status(500).json({ sucesso: false, mensagem: 'Erro interno no banco.' });
+    return res.status(500).json({ sucesso: false, mensagem: 'Erro interno.' });
   }
 });
-
-/* ==========================================
-   2. GESTÃO DE USUÁRIOS
-   ========================================== */
 
 app.get('/api/usuarios', async (req, res) => {
   try {
     const rows = await executarQuery(`SELECT id, nome, usuario, cpf, perfil FROM usuarios ORDER BY id DESC`);
     res.json(rows || []);
-  } catch (err) {
-    res.status(500).json({ sucesso: false, mensagem: err.message });
-  }
+  } catch (err) { res.status(500).json([]); }
 });
-
-app.post('/api/usuarios', async (req, res) => {
-  const { nome, usuario, cpf, senha_hash, perfil } = req.body;
-  if (!nome || !usuario || !senha_hash) {
-    return res.status(400).json({ sucesso: false, mensagem: 'Nome, usuário e senha são obrigatórios.' });
-  }
-
-  const userLimpo = String(usuario).trim().toLowerCase();
-  const cpfLimpo = cpf && String(cpf).trim() !== '' ? String(cpf).replace(/\D/g, '') : null;
-
-  try {
-    await executarQuery(
-      `INSERT INTO usuarios (nome, usuario, cpf, senha_hash, perfil) VALUES (?, ?, ?, ?, ?)`,
-      [nome.trim(), userLimpo, cpfLimpo, senha_hash.trim(), perfil || 'USUARIO']
-    );
-    res.status(201).json({ sucesso: true, mensagem: 'Usuário cadastrado com sucesso!' });
-  } catch (err) {
-    if (err.message.includes('UNIQUE') || err.message.includes('unique')) {
-      return res.status(400).json({ sucesso: false, mensagem: 'Nome de usuário ou CPF já cadastrado.' });
-    }
-    res.status(500).json({ sucesso: false, mensagem: err.message });
-  }
-});
-
-app.delete('/api/usuarios/:id', async (req, res) => {
-  const { id } = req.params;
-  try {
-    const rows = await executarQuery(`SELECT usuario FROM usuarios WHERE id = ?`, [id]);
-    const u = rows[0];
-
-    if (!u) return res.status(404).json({ sucesso: false, mensagem: 'Usuário não encontrado.' });
-
-    const PROTECTED_USERS = ['monstro', 'monstrobr', 'rasmadmin'];
-    if (PROTECTED_USERS.includes(u.usuario.toLowerCase())) {
-      return res.status(403).json({
-        sucesso: false,
-        mensagem: `Ação negada: O usuário administrador (${u.usuario}) é protegido!`
-      });
-    }
-
-    await executarQuery(`DELETE FROM usuarios WHERE id = ?`, [id]);
-    res.json({ sucesso: true, mensagem: 'Usuário excluído com sucesso!' });
-  } catch (err) {
-    res.status(500).json({ sucesso: false, mensagem: err.message });
-  }
-});
-
-/* ==========================================
-   3. OPERAÇÕES DA GRADE HORÁRIA E ALOCAÇÕES
-   ========================================== */
 
 app.get('/api/turmas', async (req, res) => {
   try {
     const rows = await executarQuery(`
       SELECT t.id, t.nome_descricao, COALESCE(tu.codigo, 'N/A') AS turno_codigo, COALESCE(tu.nome, 'GERAL') AS turno_nome 
-      FROM turmas t 
-      LEFT JOIN turnos tu ON t.turno_id = tu.id 
-      ORDER BY t.id ASC
+      FROM turmas t LEFT JOIN turnos tu ON t.turno_id = tu.id ORDER BY t.id ASC
     `);
     res.json(rows || []);
-  } catch (err) {
-    res.json([]);
-  }
+  } catch (err) { res.json([]); }
 });
 
 app.get('/api/alocacoes', async (req, res) => {
@@ -384,11 +410,10 @@ app.get('/api/alocacoes', async (req, res) => {
       FROM alocacoes a
       LEFT JOIN disciplinas d ON a.disciplina_id = d.id
       LEFT JOIN professores p ON a.professor_id = p.id
+      ORDER BY a.id ASC
     `);
     res.json(rows || []);
-  } catch (err) {
-    res.json([]);
-  }
+  } catch (err) { res.json([]); }
 });
 
 app.get('/api/grade', async (req, res) => {
@@ -401,9 +426,7 @@ app.get('/api/grade', async (req, res) => {
       LEFT JOIN professores p ON a.professor_id = p.id
     `);
     res.json(rows || []);
-  } catch (err) {
-    res.json([]);
-  }
+  } catch (err) { res.json([]); }
 });
 
 app.post('/api/grade', async (req, res) => {
@@ -411,42 +434,28 @@ app.post('/api/grade', async (req, res) => {
   try {
     if (isPostgres) {
       await executarQuery(
-        `INSERT INTO grade_horaria (turma_id, dia_semana, num_aula, alocacao_id)
-         VALUES (?, ?, ?, ?)
+        `INSERT INTO grade_horaria (turma_id, dia_semana, num_aula, alocacao_id) VALUES (?, ?, ?, ?)
          ON CONFLICT (turma_id, dia_semana, num_aula) DO UPDATE SET alocacao_id = EXCLUDED.alocacao_id`,
         [turma_id, dia_semana, num_aula, alocacao_id]
       );
     } else {
       await executarQuery(
-        `INSERT INTO grade_horaria (turma_id, dia_semana, num_aula, alocacao_id)
-         VALUES (?, ?, ?, ?)
+        `INSERT INTO grade_horaria (turma_id, dia_semana, num_aula, alocacao_id) VALUES (?, ?, ?, ?)
          ON CONFLICT(turma_id, dia_semana, num_aula) DO UPDATE SET alocacao_id = excluded.alocacao_id`,
         [turma_id, dia_semana, num_aula, alocacao_id]
       );
     }
-    res.status(200).json({ mensagem: 'Sucesso' });
-  } catch (err) {
-    res.status(500).json({ mensagem: err.message });
-  }
+    res.json({ mensagem: 'Sucesso' });
+  } catch (err) { res.status(500).json({ mensagem: err.message }); }
 });
 
 app.delete('/api/grade', async (req, res) => {
   const { turma_id, dia_semana, num_aula } = req.body;
   try {
-    await executarQuery(`DELETE FROM grade_horaria WHERE turma_id = ? AND dia_semana = ? AND num_aula = ?`, [
-      turma_id,
-      dia_semana,
-      num_aula
-    ]);
-    res.status(200).json({ mensagem: 'Aula removida' });
-  } catch (err) {
-    res.status(500).json({ mensagem: err.message });
-  }
+    await executarQuery(`DELETE FROM grade_horaria WHERE turma_id = ? AND dia_semana = ? AND num_aula = ?`, [turma_id, dia_semana, num_aula]);
+    res.json({ mensagem: 'Aula removida' });
+  } catch (err) { res.status(500).json({ mensagem: err.message }); }
 });
-
-/* ==========================================
-   4. NAVEGAÇÃO E PÁGINAS
-   ========================================== */
 
 app.get('/login', (req, res) => res.sendFile(path.join(FRONTEND_PATH, 'login.html')));
 app.get('/login.html', (req, res) => res.sendFile(path.join(FRONTEND_PATH, 'login.html')));

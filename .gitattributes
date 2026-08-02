@@ -1,0 +1,15 @@
+# Normaliza as quebras de linha no repositório (LF), independente do sistema de
+# cada pessoa. Sem isto, o mesmo arquivo aparece como "modificado" só por ter
+# sido aberto no Windows.
+* text=auto eol=lf
+
+# Arquivos binários: nunca converter.
+*.xlsx binary
+*.db   binary
+*.png  binary
+*.jpg  binary
+*.ico  binary
+
+# Scripts do Windows precisam de CRLF para funcionar.
+*.bat text eol=crlf
+*.cmd text eol=crlf

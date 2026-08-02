@@ -1,7 +1,15 @@
-/* Card Arrastável */
+/* ============================================================
+   ESTILOS COMPLEMENTARES — Grade Horária (CEEBJA / EJA)
+   Complementa o Tailwind com os estados que dependem de JS.
+   Observação: no projeto original este arquivo existia mas não
+   era referenciado por nenhuma página, e as classes abaixo nunca
+   chegavam a ser aplicadas.
+   ============================================================ */
+
+/* ---------- Cards arrastáveis ---------- */
 .card-materia {
   cursor: grab;
-  transition: all 0.2s ease-in-out;
+  transition: box-shadow 0.15s ease-in-out, opacity 0.15s ease-in-out;
 }
 
 .card-materia:active {
@@ -9,21 +17,91 @@
   opacity: 0.6;
 }
 
-/* Animação e Estilo do Conflito */
+.card-materia[aria-disabled='true'] {
+  cursor: default;
+  opacity: 0.75;
+}
+
+/* ---------- Célula da grade ---------- */
+.slot-aula {
+  min-height: 56px;
+  transition: background-color 0.12s ease-in-out, border-color 0.12s ease-in-out;
+}
+
+/* Realce da área de destino durante o arraste */
+.celula-hover {
+  background-color: #eff6ff !important; /* blue-50 */
+  border: 2px dashed #3b82f6 !important; /* blue-500 */
+}
+
+/* Choque de horário: o mesmo professor em duas turmas no mesmo tempo */
 .celula-conflito {
-  background-color: #fee2e2 !important; /* Red 100 */
-  border: 2px solid #ef4444 !important; /* Red 500 */
+  background-color: #fee2e2 !important; /* red-100 */
+  border: 2px solid #ef4444 !important; /* red-500 */
   color: #991b1b !important;
   animation: piscar 0.8s ease-in-out infinite alternate;
 }
 
 @keyframes piscar {
   from { border-color: #ef4444; }
-  to { border-color: #b91c1c; }
+  to   { border-color: #b91c1c; }
 }
 
-/* Área de Drop Highlight */
-.celula-hover {
-  background-color: #eff6ff !important; /* Blue 50 */
-  border: 2px dashed #3b82f6 !important; /* Blue 500 */
+/* Respeita quem prefere menos animação na interface */
+@media (prefers-reduced-motion: reduce) {
+  .celula-conflito {
+    animation: none;
+  }
+  .card-materia {
+    transition: none;
+  }
+}
+
+/* ---------- Aviso flutuante (toast) ---------- */
+#area-avisos {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: min(24rem, calc(100vw - 2rem));
+}
+
+.aviso {
+  padding: 0.65rem 0.9rem;
+  border-radius: 0.6rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.35;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.15);
+  border: 1px solid transparent;
+  animation: surgir 0.18s ease-out;
+}
+
+.aviso-erro    { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
+.aviso-alerta  { background: #fffbeb; color: #b45309; border-color: #fde68a; }
+.aviso-sucesso { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
+
+@keyframes surgir {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ---------- Impressão do quadro de horários ---------- */
+@media print {
+  header,
+  footer,
+  #coluna-cards-arrastaveis,
+  #area-avisos,
+  #bloco-seletor {
+    display: none !important;
+  }
+
+  #coluna-quadro-grade {
+    box-shadow: none !important;
+    border: none !important;
+    width: 100% !important;
+  }
 }

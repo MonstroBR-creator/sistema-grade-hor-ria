@@ -1,6 +1,28 @@
 {
+  "name": "sistema-grade-horaria",
+  "version": "1.4.0",
+  "description": "Sistema de Gestão de Grade Horária do CEEBJA / EJA",
+  "main": "backend/server.js",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node backend/server.js",
+    "dev": "node --watch backend/server.js",
+    "importar": "node backend/importar.js",
+    "inspecionar": "node backend/importar.js --inspecionar",
+    "conferir": "node backend/conferir.js"
+  },
   "dependencies": {
-    "pg": "^8.22.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.11.5",
     "xlsx": "^0.18.5"
+  },
+  "optionalDependencies": {
+    "sqlite3": "^5.1.7"
   }
 }

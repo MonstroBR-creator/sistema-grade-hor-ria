@@ -7,7 +7,21 @@
 
 const fs = require('fs');
 const path = require('path');
-const sqlite3 = require('sqlite3').verbose();
+
+// sqlite3 é dependência OPCIONAL: é um módulo nativo, e em produção (PostgreSQL)
+// este arquivo nunca chega a ser carregado. Assim, uma falha ao compilá-lo no
+// servidor não derruba o deploy.
+let sqlite3;
+try {
+  sqlite3 = require('sqlite3').verbose();
+} catch (erro) {
+  throw new Error(
+    'O pacote "sqlite3" não está instalado, e nenhuma DATABASE_URL foi definida.\n' +
+      'Defina DATABASE_URL para usar PostgreSQL, ou rode `npm install sqlite3` para\n' +
+      'trabalhar localmente com SQLite.\n' +
+      `Detalhe: ${erro.message}`
+  );
+}
 
 const DIRETORIO_PADRAO = path.join(__dirname, '..', 'database');
 

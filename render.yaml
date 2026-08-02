@@ -1,0 +1,50 @@
+# ============================================================
+# Render — Sistema de Grade Horária (CEEBJA / EJA)
+#
+# Descreve o serviço web e o banco PostgreSQL. Com este arquivo no
+# repositório, o Render monta tudo pelo Blueprint (New → Blueprint).
+#
+# Se o serviço JÁ existe no Render, este arquivo não o reconfigura sozinho:
+# confira as variáveis abaixo no painel do serviço.
+# ============================================================
+
+databases:
+  - name: grade-horaria-db
+    databaseName: grade_horaria
+    user: grade_horaria
+    plan: free          # o plano gratuito do Postgres expira; veja o README
+    postgresMajorVersion: "16"
+
+services:
+  - type: web
+    name: grade-horaria
+    runtime: node
+    plan: free
+    region: oregon
+    branch: main
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /login.html
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # Ligação com o banco acima. O Render preenche o valor sozinho.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: grade-horaria-db
+          property: connectionString
+
+      # Chave de assinatura das sessões. generateValue cria um valor aleatório
+      # na primeira vez e nunca mais o altera.
+      # ATENÇÃO: trocar esta chave desconecta todo mundo imediatamente.
+      - key: JWT_SECRET
+        generateValue: true
+
+      # Conta mestre criada no primeiro start. Defina a senha no painel do
+      # Render (Environment → Add Environment Variable) ANTES do primeiro
+      # deploy; depois disso a conta já existe e a variável não tem mais efeito.
+      - key: MESTRE_USUARIO
+        value: mestre
+      - key: MESTRE_SENHA
+        sync: false        # solicitado no painel, não fica no repositório

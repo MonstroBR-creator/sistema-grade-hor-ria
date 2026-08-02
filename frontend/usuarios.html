@@ -3,16 +3,21 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Gestão de Usuários — Monstro Tecnologias</title>
+  <meta name="description" content="Painel de controle de acessos do sistema de grade horária.">
+  <title>Gestão de Usuários — CEEBJA | RASM Tecnologia</title>
+
   <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="css/styles.css">
+
+  <script src="js/sessao.js" data-guard="privado"></script>
 </head>
 <body class="bg-slate-100 min-h-screen text-slate-800 flex flex-col justify-between">
 
   <div>
-    <!-- BARRA SUPERIOR (HEADER) -->
+    <!-- BARRA SUPERIOR -->
     <header class="bg-slate-900 text-white shadow-md px-6 py-3 flex justify-between items-center border-b border-slate-800">
       <div class="flex items-center gap-3">
-        <div class="bg-blue-600 text-white w-9 h-9 rounded-lg flex items-center justify-center font-bold text-lg shadow">
+        <div class="bg-blue-600 text-white w-9 h-9 rounded-lg flex items-center justify-center font-bold text-lg shadow" aria-hidden="true">
           👤
         </div>
         <div>
@@ -22,209 +27,128 @@
       </div>
 
       <div class="flex items-center gap-3">
+        <div class="hidden sm:flex flex-col text-right">
+          <span id="nome-usuario-logado" class="text-xs font-bold text-slate-200">Carregando...</span>
+          <span id="perfil-usuario-logado" class="text-[10px] text-blue-400 uppercase font-semibold">—</span>
+        </div>
+
         <a href="/index.html" class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold px-3 py-2 rounded-lg border border-slate-700 transition-all flex items-center gap-1">
           ⬅️ Voltar à Grade
         </a>
-        <button onclick="fazerLogout()" class="bg-red-600/90 hover:bg-red-600 text-white text-xs font-bold px-3 py-2 rounded-lg shadow transition-all">
+        <button type="button" data-acao="sair" class="bg-red-600/90 hover:bg-red-600 text-white text-xs font-bold px-3 py-2 rounded-lg shadow transition-all cursor-pointer">
           Sair
         </button>
       </div>
     </header>
 
-    <!-- CONTEÚDO PRINCIPAL -->
     <main class="max-w-6xl mx-auto p-4 md:p-6 space-y-6">
 
-      <!-- FORMULÁRIO DE CADASTRO -->
-      <div class="bg-white rounded-2xl shadow-sm border border-slate-200/80 p-6">
-        <h2 class="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4 pb-2 border-b border-slate-100 flex items-center gap-2">
-          ➕ Cadastrar Novo Usuário
-        </h2>
-
-        <div id="alerta-msg" class="hidden mb-4 p-3 rounded-lg text-xs font-semibold"></div>
-
-        <form id="form-criar-usuario" onsubmit="criarUsuario(event)" class="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <label class="block text-xs font-bold text-slate-700 mb-1 uppercase">Nome Completo *</label>
-            <input type="text" id="cad-nome" required placeholder="Ex: João da Silva" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500">
-          </div>
-
-          <div>
-            <label class="block text-xs font-bold text-slate-700 mb-1 uppercase">Nome de Usuário (Login) *</label>
-            <input type="text" id="cad-usuario" required placeholder="Ex: joao.silva" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500">
-          </div>
-
-          <div>
-            <label class="block text-xs font-bold text-slate-700 mb-1 uppercase">CPF (Apenas Números)</label>
-            <input type="text" id="cad-cpf" placeholder="000.000.000-00" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500">
-          </div>
-
-          <div>
-            <label class="block text-xs font-bold text-slate-700 mb-1 uppercase">Senha de Acesso *</label>
-            <input type="password" id="cad-senha" required placeholder="••••••••" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500">
-          </div>
-
-          <div>
-            <label class="block text-xs font-bold text-slate-700 mb-1 uppercase">Perfil de Acesso</label>
-            <select id="cad-perfil" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500">
-              <option value="USUARIO">USUÁRIO COMUM</option>
-              <option value="PEDAGOGICO">EQUIPE PEDAGÓGICA</option>
-              <option value="SECRETARIA">SECRETARIA</option>
-              <option value="ADMINISTRADOR">ADMINISTRADOR</option>
-            </select>
-          </div>
-
-          <div class="flex items-end">
-            <button type="submit" id="btn-cadastrar" class="w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-bold py-2.5 px-4 rounded-lg shadow transition-all cursor-pointer">
-              Salvar Usuário
-            </button>
-          </div>
-        </form>
+      <!-- Exibido quando o perfil conectado não tem permissão de gestão -->
+      <div id="bloqueio-perfil" class="hidden bg-white rounded-2xl shadow-sm border border-amber-200 p-8 text-center">
+        <p class="text-3xl mb-3" aria-hidden="true">🔒</p>
+        <h2 class="text-sm font-bold text-slate-800 uppercase tracking-wider mb-1">Acesso restrito</h2>
+        <p class="text-xs text-slate-500">
+          Apenas as contas <strong>MESTRE</strong> e <strong>ADMINISTRADOR</strong> podem gerenciar
+          usuários do sistema.
+        </p>
+        <a href="/index.html" class="inline-block mt-5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-lg shadow">
+          Voltar à grade
+        </a>
       </div>
 
-      <!-- TABELA DE USUÁRIOS CADASTRADOS -->
-      <div class="bg-white rounded-2xl shadow-sm border border-slate-200/80 p-6">
-        <h2 class="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4 pb-2 border-b border-slate-100 flex items-center gap-2">
-          📋 Usuários Cadastrados no Sistema
-        </h2>
+      <div id="conteudo-usuarios" class="space-y-6">
+        <!-- FORMULÁRIO DE CADASTRO -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200/80 p-6">
+          <h2 class="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4 pb-2 border-b border-slate-100 flex items-center gap-2">
+            ➕ Cadastrar Novo Usuário
+          </h2>
 
-        <div class="overflow-x-auto">
-          <table class="w-full text-left border-collapse border border-slate-200 text-xs">
-            <thead>
-              <tr class="bg-slate-100 text-slate-700 font-bold uppercase tracking-wider border-b border-slate-200">
-                <th class="p-3 border border-slate-200">ID</th>
-                <th class="p-3 border border-slate-200">Nome</th>
-                <th class="p-3 border border-slate-200">Usuário</th>
-                <th class="p-3 border border-slate-200">CPF</th>
-                <th class="p-3 border border-slate-200">Perfil</th>
-                <th class="p-3 border border-slate-200 text-center">Ações</th>
-              </tr>
-            </thead>
-            <tbody id="tabela-corpo-usuarios">
-              <tr>
-                <td colspan="6" class="p-4 text-center text-slate-400 italic">Carregando usuários...</td>
-              </tr>
-            </tbody>
-          </table>
+          <div id="alerta-msg" role="status" aria-live="polite" class="hidden"></div>
+
+          <form id="form-criar-usuario" class="grid grid-cols-1 md:grid-cols-3 gap-4" novalidate>
+            <div>
+              <label for="cad-nome" class="block text-xs font-bold text-slate-700 mb-1 uppercase">Nome Completo *</label>
+              <input type="text" id="cad-nome" required autocomplete="name" placeholder="Ex: João da Silva"
+                     class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+
+            <div>
+              <label for="cad-usuario" class="block text-xs font-bold text-slate-700 mb-1 uppercase">Nome de Usuário (Login) *</label>
+              <input type="text" id="cad-usuario" required autocomplete="off" placeholder="Ex: joao.silva"
+                     pattern="[A-Za-z0-9._-]{3,50}" title="De 3 a 50 caracteres: letras, números, ponto, hífen ou underline."
+                     class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+
+            <div>
+              <label for="cad-cpf" class="block text-xs font-bold text-slate-700 mb-1 uppercase">CPF (opcional)</label>
+              <input type="text" id="cad-cpf" inputmode="numeric" maxlength="14" placeholder="000.000.000-00"
+                     class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+
+            <div>
+              <label for="cad-senha" class="block text-xs font-bold text-slate-700 mb-1 uppercase">Senha de Acesso *</label>
+              <input type="password" id="cad-senha" required minlength="6" autocomplete="new-password" placeholder="Mínimo de 6 caracteres"
+                     class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+
+            <div>
+              <label for="cad-perfil" class="block text-xs font-bold text-slate-700 mb-1 uppercase">Perfil de Acesso</label>
+              <select id="cad-perfil" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="USUARIO">USUÁRIO COMUM</option>
+                <option value="PEDAGOGICO">EQUIPE PEDAGÓGICA</option>
+                <option value="SECRETARIA">SECRETARIA</option>
+                <option value="CONSULTA">CONSULTA (SOMENTE LEITURA)</option>
+                <option value="ADMINISTRADOR">ADMINISTRADOR</option>
+              </select>
+            </div>
+
+            <div class="flex items-end">
+              <button type="submit" id="btn-cadastrar"
+                      class="w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-bold py-2.5 px-4 rounded-lg shadow transition-all cursor-pointer">
+                Salvar Usuário
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- TABELA DE USUÁRIOS -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200/80 p-6">
+          <h2 class="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4 pb-2 border-b border-slate-100 flex items-center gap-2">
+            📋 Usuários Cadastrados no Sistema
+          </h2>
+
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse border border-slate-200 text-xs">
+              <thead>
+                <tr class="bg-slate-100 text-slate-700 font-bold uppercase tracking-wider border-b border-slate-200">
+                  <th scope="col" class="p-3 border border-slate-200">ID</th>
+                  <th scope="col" class="p-3 border border-slate-200">Nome</th>
+                  <th scope="col" class="p-3 border border-slate-200">Usuário</th>
+                  <th scope="col" class="p-3 border border-slate-200">CPF</th>
+                  <th scope="col" class="p-3 border border-slate-200">Perfil</th>
+                  <th scope="col" class="p-3 border border-slate-200 text-center">Ações</th>
+                </tr>
+              </thead>
+              <tbody id="tabela-corpo-usuarios">
+                <tr>
+                  <td colspan="6" class="p-4 text-center text-slate-400 italic">Carregando usuários...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
     </main>
   </div>
 
-  <!-- RODAPÉ INSTITUCIONAL -->
   <footer class="w-full text-center py-4 text-slate-400 text-xs space-y-1">
     <p class="font-medium text-slate-500">
-      Desenvolvido por <strong class="text-slate-700">Monstro Tecnologias</strong> — CNPJ: 33.131.697/0001-99
+      Desenvolvido por <strong class="text-slate-700">RASM Tecnologia</strong> — CNPJ: 33.131.697/0001-99
     </p>
-    <p class="text-[11px]">&copy; 2024–2026 Monstro Tecnologias. Todos os direitos reservados.</p>
+    <p class="text-[11px]">&copy; 2024–2026 RASM Tecnologia. Todos os direitos reservados.</p>
   </footer>
 
-  <script>
-    // Validação de autenticação
-    (function () {
-      const token = localStorage.getItem('token');
-      if (!token) window.location.replace('/login.html');
-    })();
-
-    function fazerLogout() {
-      localStorage.clear();
-      window.location.replace('/login.html');
-    }
-
-    document.addEventListener('DOMContentLoaded', carregarUsuarios);
-
-    async function carregarUsuarios() {
-      const tbody = document.getElementById('tabela-corpo-usuarios');
-      try {
-        const res = await fetch('/api/usuarios');
-        const usuarios = await res.json();
-
-        if (!usuarios || usuarios.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="6" class="p-4 text-center text-slate-400 italic">Nenhum usuário cadastrado.</td></tr>`;
-          return;
-        }
-
-        tbody.innerHTML = '';
-        usuarios.forEach(u => {
-          const tr = document.createElement('tr');
-          tr.className = 'border-b border-slate-200 hover:bg-slate-50 transition-colors';
-
-          tr.innerHTML = `
-            <td class="p-3 border border-slate-200 font-bold text-slate-500">${u.id}</td>
-            <td class="p-3 border border-slate-200 font-semibold text-slate-800">${u.nome}</td>
-            <td class="p-3 border border-slate-200 text-blue-600 font-mono">${u.usuario}</td>
-            <td class="p-3 border border-slate-200 text-slate-600">${u.cpf || '-'}</td>
-            <td class="p-3 border border-slate-200 font-bold text-xs uppercase text-slate-700">${u.perfil}</td>
-            <td class="p-3 border border-slate-200 text-center">
-              <button onclick="excluirUsuario(${u.id}, '${u.nome}')" class="bg-red-500 hover:bg-red-600 text-white font-bold text-[11px] px-2.5 py-1 rounded shadow transition-all cursor-pointer">
-                Excluir
-              </button>
-            </td>
-          `;
-          tbody.appendChild(tr);
-        });
-
-      } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="6" class="p-4 text-center text-red-500">Erro ao carregar lista de usuários.</td></tr>`;
-      }
-    }
-
-    async function criarUsuario(e) {
-      e.preventDefault();
-      const msgDiv = document.getElementById('alerta-msg');
-      msgDiv.className = 'hidden mb-4 p-3 rounded-lg text-xs font-semibold';
-
-      const novoUsuario = {
-        nome: document.getElementById('cad-nome').value,
-        usuario: document.getElementById('cad-usuario').value,
-        cpf: document.getElementById('cad-cpf').value,
-        senha_hash: document.getElementById('cad-senha').value,
-        perfil: document.getElementById('cad-perfil').value
-      };
-
-      try {
-        const res = await fetch('/api/usuarios', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(novoUsuario)
-        });
-
-        const data = await res.json();
-
-        if (res.ok && data.sucesso) {
-          msgDiv.textContent = data.mensagem;
-          msgDiv.classList.add('bg-emerald-50', 'text-emerald-700', 'border', 'border-emerald-200');
-          msgDiv.classList.remove('hidden');
-          document.getElementById('form-criar-usuario').reset();
-          carregarUsuarios();
-        } else {
-          msgDiv.textContent = data.mensagem || 'Erro ao cadastrar.';
-          msgDiv.classList.add('bg-red-50', 'text-red-700', 'border', 'border-red-200');
-          msgDiv.classList.remove('hidden');
-        }
-      } catch (err) {
-        msgDiv.textContent = 'Erro ao conectar ao servidor.';
-        msgDiv.classList.add('bg-red-50', 'text-red-700', 'border', 'border-red-200');
-        msgDiv.classList.remove('hidden');
-      }
-    }
-
-    async function excluirUsuario(id, nome) {
-      if (!confirm(`Tem certeza que deseja excluir o usuário "${nome}"?`)) return;
-
-      try {
-        const res = await fetch(`/api/usuarios/${id}`, { method: 'DELETE' });
-        const data = await res.json();
-
-        if (res.ok && data.sucesso) {
-          carregarUsuarios();
-        } else {
-          alert(data.mensagem || 'Erro ao excluir usuário.');
-        }
-      } catch (err) {
-        alert('Erro de conexão ao tentar excluir.');
-      }
-    }
-  </script>
+  <script src="js/usuarios.js"></script>
 </body>
 </html>

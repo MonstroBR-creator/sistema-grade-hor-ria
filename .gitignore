@@ -1,0 +1,14 @@
+node_modules/
+*.log
+.DS_Store
+.env
+
+# Banco de dados local (gerado por `npm run importar`)
+backend/database/*.db
+backend/database/*.db-journal
+backend/database/*.db-wal
+backend/database/*.db-shm
+
+# Artefatos Python
+__pycache__/
+*.pyc

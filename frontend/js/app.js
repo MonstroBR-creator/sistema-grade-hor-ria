@@ -1,46 +1,17 @@
 /**
- * APP.JS - Gestão de Grade Horária (CEEBJA / EJA)
- * Arquitetura: Clean Code / Vanilla JS / REST API
- * Desenvolvedor Full Stack Sênior & Master Data Analyst
+ * APP.JS — Montagem da grade horária (CEEBJA / EJA)
+ * Requer js/sessao.js carregado antes (Sessao, api, escapeHtml, avisar).
  */
 
-// --- CONTROLE DE SESSÃO E LOGOUT AUTOMÁTICO ---
-(function verificarAutenticacao() {
-  const token = localStorage.getItem('token');
-  const usuarioRaw = localStorage.getItem('usuario');
+'use strict';
 
-  // Se não houver token/sessão, redireciona imediatamente para o login
-  if (!token || !usuarioRaw) {
-    window.location.replace('/login.html');
-    return;
-  }
+/* ==========================================
+   CONSTANTES
+   ========================================== */
 
-  // Preenche dados do usuário logado no Header assim que o DOM carregar
-  document.addEventListener('DOMContentLoaded', () => {
-    try {
-      const usuario = JSON.parse(usuarioRaw);
-      const elNome = document.getElementById('nome-usuario-logado');
-      const elPerfil = document.getElementById('perfil-usuario-logado');
-
-      if (elNome) elNome.textContent = usuario.nome || usuario.usuario;
-      if (elPerfil) elPerfil.textContent = usuario.perfil || 'ADMINISTRADOR';
-    } catch (e) {
-      console.error('Erro ao ler dados da sessão:', e);
-    }
-  });
-})();
-
-// Função global para encerrar a sessão
-function fazerLogout() {
-  localStorage.removeItem('token');
-  localStorage.removeItem('usuario');
-  window.location.replace('/login.html');
-}
-
-// --- CONFIGURAÇÃO GLOBAL E CONSTANTES ---
 const DIAS_SEMANA = ['SEGUNDA', 'TERÇA', 'QUARTA', 'QUINTA', 'SEXTA'];
+const NUMEROS_AULA = [1, 2, 3, 4, 5];
 
-// Horários por Turno (Tarde iniciando exatamente às 13:30)
 const HORARIOS_TURNO = {
   MANHA: [
     { num: 1, rotulo: '1ª AULA', inicio: '07:50', fim: '08:40' },
@@ -68,228 +39,315 @@ const HORARIOS_TURNO = {
   ]
 };
 
-let turmaSelecionadaObj = null;
-let alocacoesTurma = [];
-let gradeAlocada = {};
-let todasAsGradesGlobal = [];
+/** Ordem de exibição dos grupos no seletor de turmas. */
+const CATEGORIAS = [
+  { chave: 'MANHA_FUNDAMENTAL', label: '📍 MANHÃ — ENSINO FUNDAMENTAL' },
+  { chave: 'MANHA_MEDIO', label: '📍 MANHÃ — ENSINO MÉDIO' },
+  { chave: 'MANHA_OUTRO', label: '📍 MANHÃ — OUTRAS' },
+  { chave: 'TARDE_FUNDAMENTAL', label: '📍 TARDE — ENSINO FUNDAMENTAL' },
+  { chave: 'TARDE_MEDIO', label: '📍 TARDE — ENSINO MÉDIO' },
+  { chave: 'TARDE_OUTRO', label: '📍 TARDE — OUTRAS' },
+  { chave: 'NOITE_FUNDAMENTAL', label: '📍 NOITE — ENSINO FUNDAMENTAL' },
+  { chave: 'NOITE_MEDIO', label: '📍 NOITE — ENSINO MÉDIO' },
+  { chave: 'NOITE_OUTRO', label: '📍 NOITE — OUTRAS' },
+  { chave: 'SEMIPRESENCIAL', label: '📍 SEMIPRESENCIAL' }
+];
+
+/* ==========================================
+   ESTADO
+   ========================================== */
+
+const estado = {
+  turmas: new Map(),      // id (string) -> objeto da turma
+  turmaSelecionada: null,
+  alocacoesTurma: [],
+  gradeAlocada: {},       // "DIA-AULA" -> alocacao_id
+  gradeGlobal: [],
+  conflitos: new Map()    // "professor|dia|aula" -> { professor, dia, aula, turmas: [] }
+};
+
+const somenteLeitura = () => Sessao.somenteLeitura();
+
+/* ==========================================
+   INICIALIZAÇÃO
+   ========================================== */
 
 document.addEventListener('DOMContentLoaded', () => {
-  inicializarSistema();
+  aplicarModoSomenteLeitura();
+  carregarTurmas();
 });
 
-async function inicializarSistema() {
-  const select = document.getElementById('select-turma-unica');
+function aplicarModoSomenteLeitura() {
+  if (!somenteLeitura()) return;
 
-  try {
-    const res = await fetch('/api/turmas');
-    const turmas = await res.json();
+  document.getElementById('coluna-cards-arrastaveis')?.remove();
+  document.getElementById('banner-modo-consulta')?.classList.remove('hidden');
 
-    if (!turmas || turmas.length === 0) {
-      select.innerHTML = '<option value="">Nenhuma turma cadastrada</option>';
-      return;
-    }
-
-    select.innerHTML = '<option value="">-- SELECIONE A TURMA --</option>';
-
-    // --- REGRAS DE HIERARQUIA E GRUPOS DO SELECT ---
-    const categorias = [
-      { chave: 'MANHA_FUND', label: '📍 MANHÃ — ENSINO FUNDAMENTAL', filtro: t => ehTurno(t, 'MANHA') && ehNivel(t, 'FUNDAMENTAL') },
-      { chave: 'MANHA_MEDIO', label: '📍 MANHÃ — ENSINO MÉDIO', filtro: t => ehTurno(t, 'MANHA') && ehNivel(t, 'MEDIO') },
-      { chave: 'TARDE_FUND', label: '📍 TARDE — ENSINO FUNDAMENTAL', filtro: t => ehTurno(t, 'TARDE') && ehNivel(t, 'FUNDAMENTAL') },
-      { chave: 'TARDE_MEDIO', label: '📍 TARDE — ENSINO MÉDIO', filtro: t => ehTurno(t, 'TARDE') && ehNivel(t, 'MEDIO') },
-      { chave: 'NOITE_FUND', label: '📍 NOITE — ENSINO FUNDAMENTAL', filtro: t => ehTurno(t, 'NOITE') && ehNivel(t, 'FUNDAMENTAL') && !ehSemipresencial(t) },
-      { chave: 'NOITE_MEDIO', label: '📍 NOITE — ENSINO MÉDIO', filtro: t => ehTurno(t, 'NOITE') && ehNivel(t, 'MEDIO') && !ehSemipresencial(t) },
-      { chave: 'NOITE_SEMI', label: '📍 NOITE — SEMIPRESENCIAL', filtro: t => ehSemipresencial(t) || (ehTurno(t, 'NOITE') && (t.nome_descricao || '').toUpperCase().includes('SEMI')) }
-    ];
-
-    categorias.forEach(cat => {
-      const listaGrupo = turmas.filter(cat.filtro);
-      if (listaGrupo.length > 0) {
-        // Ordenação por módulo numérico (1º, 2º, 3º...)
-        listaGrupo.sort((a, b) => (a.nome_descricao || '').localeCompare(b.nome_descricao || '', undefined, { numeric: true }));
-
-        const group = document.createElement('optgroup');
-        group.label = cat.label;
-
-        listaGrupo.forEach(t => {
-          const opt = document.createElement('option');
-          opt.value = t.id;
-          opt.textContent = t.nome_descricao;
-          opt.dataset.turmaObj = JSON.stringify(t);
-          group.appendChild(opt);
-        });
-
-        select.appendChild(group);
-      }
-    });
-
-    select.addEventListener('change', (e) => {
-      const selectedOpt = select.options[select.selectedIndex];
-      if (e.target.value && selectedOpt.dataset.turmaObj) {
-        turmaSelecionadaObj = JSON.parse(selectedOpt.dataset.turmaObj);
-        renderizarEstruturaQuadro(turmaSelecionadaObj);
-        carregarDadosTurma(turmaSelecionadaObj.id);
-      } else {
-        limparTelas();
-      }
-    });
-
-    // Quadro inicial padrão (Manhã)
-    renderizarEstruturaQuadro({ nome_descricao: 'MANHÃ' });
-
-  } catch (err) {
-    console.error('Erro ao inicializar seletor:', err);
-    select.innerHTML = '<option value="">Erro ao carregar turmas</option>';
+  const quadro = document.getElementById('coluna-quadro-grade');
+  if (quadro) {
+    quadro.classList.remove('lg:col-span-3');
+    quadro.classList.add('lg:col-span-4');
   }
 }
 
-// Funções auxiliares de classificação
-function ehSemipresencial(t) {
-  const desc = (t.nome_descricao || '').toUpperCase();
-  return desc.includes('SEMIPRESENCIAL') || desc.includes('SEMI') || /\b\d{1,2}\b/.test(desc);
+async function carregarTurmas() {
+  const seletor = document.getElementById('select-turma-unica');
+  if (!seletor) return;
+
+  // Quadro vazio do turno matutino enquanto nenhuma turma foi escolhida.
+  renderizarEstruturaQuadro('MANHA');
+
+  try {
+    const turmas = await api('/api/turmas');
+
+    if (!turmas.length) {
+      seletor.innerHTML = '<option value="">Nenhuma turma cadastrada</option>';
+      return;
+    }
+
+    estado.turmas = new Map(turmas.map((t) => [String(t.id), t]));
+
+    seletor.innerHTML = '<option value="">-- SELECIONE A TURMA --</option>';
+
+    // Cada turma entra em EXATAMENTE um grupo. Na versão anterior os filtros se
+    // sobrepunham e a mesma turma aparecia repetida em vários grupos — ou sumia
+    // do seletor quando não casava com nenhum deles.
+    const grupos = new Map(CATEGORIAS.map((c) => [c.chave, []]));
+    turmas.forEach((t) => grupos.get(categoriaDaTurma(t)).push(t));
+
+    const colador = new Intl.Collator('pt-BR', { numeric: true, sensitivity: 'base' });
+
+    CATEGORIAS.forEach(({ chave, label }) => {
+      const lista = grupos.get(chave);
+      if (!lista.length) return;
+
+      lista.sort((a, b) => colador.compare(a.nome_descricao || '', b.nome_descricao || ''));
+
+      const grupo = document.createElement('optgroup');
+      grupo.label = label;
+
+      lista.forEach((t) => {
+        const opcao = document.createElement('option');
+        opcao.value = String(t.id);
+        opcao.textContent = t.nome_descricao;
+        grupo.appendChild(opcao);
+      });
+
+      seletor.appendChild(grupo);
+    });
+
+    seletor.addEventListener('change', aoTrocarTurma);
+  } catch (erro) {
+    console.error('Erro ao carregar turmas:', erro);
+    seletor.innerHTML = '<option value="">Erro ao carregar turmas</option>';
+    avisar(erro.message, 'erro');
+  }
 }
 
-function ehTurno(t, turno) {
-  const desc = (t.nome_descricao || '').toUpperCase();
-  const cod = (t.turno_codigo || '').toUpperCase();
-  if (turno === 'MANHA') return desc.includes('MANHÃ') || desc.includes('MANHA') || cod === 'A';
-  if (turno === 'TARDE') return desc.includes('TARDE') || cod === 'B';
-  if (turno === 'NOITE') return desc.includes('NOITE') || cod === 'C' || ehSemipresencial(t);
-  return false;
+function aoTrocarTurma(evento) {
+  const turma = estado.turmas.get(String(evento.target.value));
+
+  if (!turma) {
+    limparTelas();
+    return;
+  }
+
+  estado.turmaSelecionada = turma;
+  renderizarEstruturaQuadro(turnoDaTurma(turma));
+  carregarDadosTurma(turma.id);
 }
 
-function ehNivel(t, nivel) {
-  const desc = (t.nome_descricao || '').toUpperCase();
-  if (nivel === 'FUNDAMENTAL') return desc.includes('FUNDAMENTAL') || desc.includes('FUND');
-  if (nivel === 'MEDIO') return desc.includes('MÉDIO') || desc.includes('MEDIO');
-  return true;
+/* ==========================================
+   CLASSIFICAÇÃO DE TURMAS
+   ========================================== */
+
+const emMaiusculas = (turma) => String(turma?.nome_descricao || '').toUpperCase();
+
+/**
+ * Antes desta revisão a checagem era `/\b\d{1,2}\b/.test(descricao)`, que casava
+ * com QUALQUER turma cujo nome tivesse um número ("1º MÓDULO", "2º MÓDULO"...).
+ * Resultado: praticamente todas as turmas eram tratadas como semipresenciais.
+ */
+function ehSemipresencial(turma) {
+  return /\bSEMI(PRESENCIAL)?\b/.test(emMaiusculas(turma));
 }
 
-function renderizarEstruturaQuadro(turma) {
-  const tbody = document.getElementById('corpo-quadro-grade');
-  if (!tbody) return;
-  tbody.innerHTML = '';
+/** O código do turno vem do banco e é a fonte confiável; o texto é só o plano B. */
+function turnoDaTurma(turma) {
+  const codigo = String(turma?.turno_codigo || '').toUpperCase();
+  if (codigo === 'A') return 'MANHA';
+  if (codigo === 'B') return 'TARDE';
+  if (codigo === 'C') return 'NOITE';
 
-  let chaveTurno = 'MANHA';
-  const desc = (turma?.nome_descricao || '').toUpperCase();
-  if (desc.includes('TARDE')) chaveTurno = 'TARDE';
-  if (desc.includes('NOITE') || desc.includes('SEMI')) chaveTurno = 'NOITE';
+  const descricao = emMaiusculas(turma);
+  if (descricao.includes('NOITE')) return 'NOITE';
+  if (descricao.includes('TARDE')) return 'TARDE';
+  if (descricao.includes('MANHÃ') || descricao.includes('MANHA')) return 'MANHA';
+  if (ehSemipresencial(turma)) return 'NOITE';
+  return 'MANHA';
+}
 
-  const gradeHorarios = HORARIOS_TURNO[chaveTurno];
+function nivelDaTurma(turma) {
+  const descricao = emMaiusculas(turma);
+  if (descricao.includes('FUNDAMENTAL') || descricao.includes('FUND')) return 'FUNDAMENTAL';
+  if (descricao.includes('MÉDIO') || descricao.includes('MEDIO')) return 'MEDIO';
+  return 'OUTRO';
+}
 
-  gradeHorarios.forEach(item => {
+function categoriaDaTurma(turma) {
+  if (ehSemipresencial(turma)) return 'SEMIPRESENCIAL';
+  return `${turnoDaTurma(turma)}_${nivelDaTurma(turma)}`;
+}
+
+/* ==========================================
+   QUADRO DE HORÁRIOS
+   ========================================== */
+
+function renderizarEstruturaQuadro(chaveTurno) {
+  const corpo = document.getElementById('corpo-quadro-grade');
+  if (!corpo) return;
+
+  corpo.innerHTML = '';
+  const linhas = HORARIOS_TURNO[chaveTurno] || HORARIOS_TURNO.MANHA;
+
+  linhas.forEach((item) => {
     const tr = document.createElement('tr');
-    tr.className = 'border-b border-slate-200';
 
     if (item.tipo === 'PAUSA') {
       tr.className = 'bg-red-50 border-y border-red-200 text-red-700 font-bold text-xs uppercase';
       tr.innerHTML = `
-        <td class="p-2 border border-slate-200 text-center bg-red-100/50">${item.rotulo}</td>
-        <td colspan="5" class="p-2.5 text-center tracking-wide">${item.texto}</td>
+        <td class="p-2 border border-slate-200 text-center bg-red-100/50">${escapeHtml(item.rotulo)}</td>
+        <td colspan="${DIAS_SEMANA.length}" class="p-2.5 text-center tracking-wide">${escapeHtml(item.texto)}</td>
       `;
-    } else {
-      const tdHorario = document.createElement('td');
-      tdHorario.className = 'p-2 bg-slate-50 font-bold border border-slate-200 text-slate-700 w-28 text-center';
-      tdHorario.innerHTML = `
-        <div class="text-xs text-slate-800 font-bold">${item.rotulo}</div>
-        <div class="text-[10px] text-slate-500 font-normal mt-0.5">${item.inicio} - ${item.fim}</div>
-      `;
-      tr.appendChild(tdHorario);
-
-      DIAS_SEMANA.forEach(dia => {
-        const tdSlot = document.createElement('td');
-        tdSlot.className = 'p-2 border border-slate-200 slot-aula min-h-[55px] relative bg-white transition-colors text-center';
-        tdSlot.dataset.dia = dia;
-        tdSlot.dataset.aula = item.num;
-
-        tdSlot.addEventListener('dragover', e => { e.preventDefault(); tdSlot.classList.add('bg-blue-50'); });
-        tdSlot.addEventListener('dragleave', () => tdSlot.classList.remove('bg-blue-50'));
-        tdSlot.addEventListener('drop', e => tratarDropAula(e, dia, item.num));
-
-        tr.appendChild(tdSlot);
-      });
+      corpo.appendChild(tr);
+      return;
     }
 
-    tbody.appendChild(tr);
+    tr.className = 'border-b border-slate-200';
+
+    const tdHorario = document.createElement('td');
+    tdHorario.className = 'p-2 bg-slate-50 font-bold border border-slate-200 text-slate-700 w-28 text-center';
+    tdHorario.innerHTML = `
+      <div class="text-xs text-slate-800 font-bold">${escapeHtml(item.rotulo)}</div>
+      <div class="text-[10px] text-slate-500 font-normal mt-0.5">${escapeHtml(item.inicio)} - ${escapeHtml(item.fim)}</div>
+    `;
+    tr.appendChild(tdHorario);
+
+    DIAS_SEMANA.forEach((dia) => {
+      const td = document.createElement('td');
+      td.className = 'p-2 border border-slate-200 slot-aula relative bg-white text-center';
+      td.dataset.dia = dia;
+      td.dataset.aula = String(item.num);
+
+      if (!somenteLeitura()) {
+        td.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          td.classList.add('celula-hover');
+        });
+        td.addEventListener('dragleave', () => td.classList.remove('celula-hover'));
+        td.addEventListener('drop', (e) => tratarDropAula(e, td, dia, item.num));
+      }
+
+      tr.appendChild(td);
+    });
+
+    corpo.appendChild(tr);
   });
 }
 
 async function carregarDadosTurma(turmaId) {
   try {
-    const resAloc = await fetch('/api/alocacoes');
-    const todasAlocacoes = await resAloc.json();
-    alocacoesTurma = todasAlocacoes.filter(a => String(a.turma_id) === String(turmaId));
+    // A API agora filtra as alocações no servidor em vez de baixar todas e
+    // descartar a maior parte no navegador.
+    const [alocacoes, grade] = await Promise.all([
+      api(`/api/alocacoes?turma_id=${encodeURIComponent(turmaId)}`),
+      api('/api/grade')
+    ]);
 
-    const resGrade = await fetch('/api/grade');
-    todasAsGradesGlobal = await resGrade.json();
+    estado.alocacoesTurma = alocacoes;
+    estado.gradeGlobal = grade;
 
-    const gradeTurma = todasAsGradesGlobal.filter(g => String(g.turma_id) === String(turmaId));
+    estado.gradeAlocada = {};
+    grade
+      .filter((g) => String(g.turma_id) === String(turmaId))
+      .forEach((g) => {
+        estado.gradeAlocada[`${g.dia_semana}-${g.num_aula}`] = g.alocacao_id;
+      });
 
-    gradeAlocada = {};
-    gradeTurma.forEach(g => {
-      gradeAlocada[`${g.dia_semana}-${g.num_aula}`] = g.alocacao_id;
-    });
+    estado.conflitos = calcularConflitos(grade);
 
     renderizarCardsDisponiveis();
     atualizarQuadroGrade();
-    verificarConflitosGerais();
-
-  } catch (err) {
-    console.error('Erro ao carregar dados da turma:', err);
+    renderizarPainelConflitos();
+  } catch (erro) {
+    console.error('Erro ao carregar dados da turma:', erro);
+    avisar(erro.message, 'erro');
   }
 }
 
 function renderizarCardsDisponiveis() {
   const container = document.getElementById('container-cards-disponiveis');
   if (!container) return;
+
   container.innerHTML = '';
 
-  if (!alocacoesTurma || alocacoesTurma.length === 0) {
-    container.innerHTML = '<p class="text-xs text-slate-400 italic text-center py-4">Nenhuma disciplina alocada.</p>';
+  if (!estado.alocacoesTurma.length) {
+    container.innerHTML =
+      '<p class="text-xs text-slate-400 italic text-center py-4">Nenhuma disciplina alocada para esta turma.</p>';
     return;
   }
 
-  alocacoesTurma.forEach(item => {
-    const card = document.createElement('div');
-    card.draggable = true;
-    card.dataset.alocacaoId = item.alocacao_id;
+  estado.alocacoesTurma.forEach((item) => {
+    const tipo = String(item.tipo || '').toUpperCase();
+    const professor = item.professor_nome || 'A DEFINIR';
+    const semProfessor = professor === 'A DEFINIR';
 
-    const tipoUpper = (item.tipo || '').toUpperCase();
-    const profNome = item.professor_nome || 'A DEFINIR';
-    const semProf = profNome === 'A DEFINIR';
+    let cores = 'bg-white border-slate-200';
+    let selo = '';
+    let icone = semProfessor ? '⚠️' : '👤';
 
-    // --- ESTILIZAÇÃO E BADGES DAS CARDS ---
-    let bgBorderClass = 'bg-white border-slate-200';
-    let badgeHtml = '';
-    let iconProf = semProf ? '⚠️' : '👤';
-
-    if (tipoUpper.includes('SISTEMA') || tipoUpper.includes('ONLINE')) {
-      bgBorderClass = 'bg-purple-50/60 border-purple-200';
-      badgeHtml = `<span class="bg-purple-200/80 text-purple-800 text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider">SISTEMA</span>`;
-      iconProf = '💻';
-    } else if (tipoUpper.includes('TUTORIA')) {
-      bgBorderClass = 'bg-emerald-50/60 border-emerald-200';
-      badgeHtml = `<span class="bg-emerald-200/80 text-emerald-800 text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider">TUTORIA</span>`;
-      iconProf = '👥';
+    if (tipo.includes('SISTEMA') || tipo.includes('ONLINE')) {
+      cores = 'bg-purple-50/60 border-purple-200';
+      selo = '<span class="bg-purple-200/80 text-purple-800 text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider">SISTEMA</span>';
+      icone = '💻';
+    } else if (tipo.includes('TUTORIA')) {
+      cores = 'bg-emerald-50/60 border-emerald-200';
+      selo = '<span class="bg-emerald-200/80 text-emerald-800 text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider">TUTORIA</span>';
+      icone = '👥';
+    } else if (tipo.includes('SEMI')) {
+      // O importador antes gravava 'PRESENCIAL' para todas as alocações; agora o
+      // tipo vem da descrição da turma e as semipresenciais ganham selo próprio.
+      cores = 'bg-sky-50/60 border-sky-200';
+      selo = '<span class="bg-sky-200/80 text-sky-800 text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider">SEMI</span>';
+      icone = '📘';
     }
 
-    const profColorClass = semProf ? 'text-amber-600 font-bold' : (tipoUpper.includes('TUTORIA') ? 'text-emerald-800 font-semibold' : 'text-slate-600');
+    const corProfessor = semProfessor
+      ? 'text-amber-600 font-bold'
+      : tipo.includes('TUTORIA')
+        ? 'text-emerald-800 font-semibold'
+        : 'text-slate-600';
 
-    card.className = `p-3.5 border rounded-xl shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md transition-all mb-3 relative ${bgBorderClass}`;
+    const card = document.createElement('div');
+    card.className = `card-materia p-3.5 border rounded-xl shadow-sm hover:shadow-md mb-3 relative ${cores}`;
+    card.draggable = true;
+    card.dataset.alocacaoId = String(item.alocacao_id);
 
+    // escapeHtml impede que um nome com aspas ou "<" quebre a marcação.
     card.innerHTML = `
       <div class="flex items-center justify-between mb-1.5">
-        <div class="font-bold text-slate-800 text-xs uppercase tracking-tight">${item.disciplina_nome}</div>
-        ${badgeHtml}
+        <div class="font-bold text-slate-800 text-xs uppercase tracking-tight">${escapeHtml(item.disciplina_nome)}</div>
+        ${selo}
       </div>
-      <div class="text-[11px] ${profColorClass} flex items-center gap-1.5">
-        <span>${iconProf}</span>
-        <span>${profNome}</span>
+      <div class="text-[11px] ${corProfessor} flex items-center gap-1.5">
+        <span>${icone}</span>
+        <span>${escapeHtml(professor)}</span>
       </div>
     `;
 
-    card.addEventListener('dragstart', e => {
-      e.dataTransfer.setData('text/plain', item.alocacao_id);
+    card.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/plain', String(item.alocacao_id));
+      e.dataTransfer.effectAllowed = 'copy';
     });
 
     container.appendChild(card);
@@ -297,127 +355,200 @@ function renderizarCardsDisponiveis() {
 }
 
 function atualizarQuadroGrade() {
-  DIAS_SEMANA.forEach(dia => {
-    [1, 2, 3, 4, 5].forEach(aula => {
-      const slotKey = `${dia}-${aula}`;
-      const alocacaoId = gradeAlocada[slotKey];
-      const slot = document.querySelector(`.slot-aula[data-dia="${dia}"][data-aula="${aula}"]`);
+  DIAS_SEMANA.forEach((dia) => {
+    NUMEROS_AULA.forEach((aula) => {
+      const celula = document.querySelector(`.slot-aula[data-dia="${dia}"][data-aula="${aula}"]`);
+      if (!celula) return;
 
-      if (slot) {
-        slot.innerHTML = '';
+      celula.innerHTML = '';
+      celula.classList.remove('celula-conflito');
 
-        if (alocacaoId) {
-          const aloc = alocacoesTurma.find(a => String(a.alocacao_id) === String(alocacaoId));
-          if (aloc) {
-            const cardSlot = document.createElement('div');
-            cardSlot.className = 'p-2 bg-blue-50 border border-blue-200 rounded-lg text-left relative group shadow-sm';
-            cardSlot.innerHTML = `
-              <button onclick="removerAulaGrade('${dia}', ${aula})" class="absolute top-1 right-1 text-red-400 font-bold text-xs opacity-0 group-hover:opacity-100 hover:text-red-600">&times;</button>
-              <div class="font-bold text-slate-800 text-[11px]">${aloc.disciplina_nome}</div>
-              <div class="text-[10px] text-slate-500 mt-0.5">${aloc.professor_nome}</div>
-            `;
-            slot.appendChild(cardSlot);
-          }
-        } else {
-          slot.innerHTML = `<span class="text-slate-300 text-xs">-</span>`;
-        }
+      const alocacaoId = estado.gradeAlocada[`${dia}-${aula}`];
+      const alocacao = alocacaoId
+        ? estado.alocacoesTurma.find((a) => String(a.alocacao_id) === String(alocacaoId))
+        : null;
+
+      if (!alocacao) {
+        celula.innerHTML = '<span class="text-slate-300 text-xs">-</span>';
+        return;
       }
+
+      if (estado.conflitos.has(chaveConflito(alocacao.professor_nome, dia, aula))) {
+        celula.classList.add('celula-conflito');
+      }
+
+      const cartao = document.createElement('div');
+      cartao.className = 'p-2 bg-blue-50 border border-blue-200 rounded-lg text-left relative group shadow-sm';
+      cartao.innerHTML = `
+        <div class="font-bold text-slate-800 text-[11px]">${escapeHtml(alocacao.disciplina_nome)}</div>
+        <div class="text-[10px] text-slate-500 mt-0.5">${escapeHtml(alocacao.professor_nome)}</div>
+      `;
+
+      if (!somenteLeitura()) {
+        // Botão criado por addEventListener em vez de onclick inline: nomes com
+        // apóstrofo (ex.: "D'Ávila") quebravam o atributo gerado por template.
+        const remover = document.createElement('button');
+        remover.type = 'button';
+        remover.className =
+          'absolute top-1 right-1 text-red-400 font-bold text-xs opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-red-600';
+        remover.innerHTML = '&times;';
+        remover.title = 'Remover esta aula';
+        remover.setAttribute('aria-label', `Remover ${alocacao.disciplina_nome} de ${dia}, ${aula}ª aula`);
+        remover.addEventListener('click', () => removerAulaGrade(dia, aula));
+        cartao.appendChild(remover);
+      }
+
+      celula.appendChild(cartao);
     });
   });
 }
 
-async function tratarDropAula(e, dia, numAula) {
-  e.preventDefault();
-  const slot = e.currentTarget;
-  slot.classList.remove('bg-blue-50');
+/* ==========================================
+   ARRASTAR E SOLTAR
+   ========================================== */
 
-  const alocacaoId = e.dataTransfer.getData('text/plain');
-  if (!alocacaoId || !turmaSelecionadaObj) return;
+async function tratarDropAula(evento, celula, dia, numAula) {
+  evento.preventDefault();
+  celula.classList.remove('celula-hover');
+
+  const alocacaoId = evento.dataTransfer.getData('text/plain');
+  if (!alocacaoId || !estado.turmaSelecionada) return;
 
   try {
-    const response = await fetch('/api/grade', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        turma_id: turmaSelecionadaObj.id,
+    const resposta = await api('/api/grade', {
+      metodo: 'POST',
+      corpo: {
+        turma_id: estado.turmaSelecionada.id,
         dia_semana: dia,
         num_aula: numAula,
-        alocacao_id: alocacaoId
-      })
+        alocacao_id: Number(alocacaoId)
+      }
     });
 
-    if (response.ok) {
-      gradeAlocada[`${dia}-${numAula}`] = alocacaoId;
-      carregarDadosTurma(turmaSelecionadaObj.id);
+    if (resposta?.conflito) {
+      avisar(
+        `Atenção: ${resposta.conflito.professor} já tem aula em "${resposta.conflito.turma}" neste horário.`,
+        'alerta',
+        7000
+      );
     }
-  } catch (err) {
-    console.error('Erro ao salvar aula na grade:', err);
+
+    await carregarDadosTurma(estado.turmaSelecionada.id);
+  } catch (erro) {
+    // Antes, uma falha ao salvar era silenciosa: a aula sumia sem explicação.
+    console.error('Erro ao salvar aula na grade:', erro);
+    avisar(erro.message, 'erro');
   }
 }
 
 async function removerAulaGrade(dia, numAula) {
-  if (!turmaSelecionadaObj) return;
+  if (!estado.turmaSelecionada) return;
 
   try {
-    const response = await fetch('/api/grade', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        turma_id: turmaSelecionadaObj.id,
+    await api('/api/grade', {
+      metodo: 'DELETE',
+      corpo: {
+        turma_id: estado.turmaSelecionada.id,
         dia_semana: dia,
         num_aula: numAula
-      })
+      }
     });
 
-    if (response.ok) {
-      delete gradeAlocada[`${dia}-${numAula}`];
-      carregarDadosTurma(turmaSelecionadaObj.id);
-    }
-  } catch (err) {
-    console.error('Erro ao remover aula:', err);
+    await carregarDadosTurma(estado.turmaSelecionada.id);
+  } catch (erro) {
+    console.error('Erro ao remover aula:', erro);
+    avisar(erro.message, 'erro');
   }
 }
 
-function verificarConflitosGerais() {
-  const alertaDiv = document.getElementById('painel-alerta');
-  if (!alertaDiv) return;
+/* ==========================================
+   CONFLITOS DE DOCENTE
+   ========================================== */
 
-  alertaDiv.classList.add('hidden');
-  alertaDiv.innerHTML = '';
+const chaveConflito = (professor, dia, aula) => `${professor}|${dia}|${aula}`;
 
-  const ocupacaoProfessor = {};
-  let conflitos = [];
+/**
+ * Agrupa a grade inteira por professor/dia/aula e reporta apenas os grupos que
+ * envolvem MAIS DE UMA turma.
+ * A versão anterior comparava uma única turma guardada por chave e empurrava um
+ * item repetido para a lista a cada ocorrência extra, gerando alertas duplicados.
+ */
+function calcularConflitos(grade) {
+  const agrupado = new Map();
 
-  todasAsGradesGlobal.forEach(g => {
-    const prof = g.professor_nome;
-    if (prof && prof !== 'A DEFINIR') {
-      const chave = `${prof}-${g.dia_semana}-${g.num_aula}`;
-      if (ocupacaoProfessor[chave] && ocupacaoProfessor[chave] !== g.turma_id) {
-        conflitos.push({ professor: prof, dia: g.dia_semana, aula: g.num_aula });
-      } else {
-        ocupacaoProfessor[chave] = g.turma_id;
-      }
+  grade.forEach((g) => {
+    const professor = String(g.professor_nome || '').trim();
+    if (!professor || professor === 'A DEFINIR') return;
+
+    const chave = chaveConflito(professor, g.dia_semana, g.num_aula);
+    if (!agrupado.has(chave)) {
+      agrupado.set(chave, { professor, dia: g.dia_semana, aula: g.num_aula, turmas: new Set() });
+    }
+    agrupado.get(chave).turmas.add(String(g.turma_id));
+  });
+
+  const conflitos = new Map();
+  agrupado.forEach((valor, chave) => {
+    if (valor.turmas.size > 1) {
+      conflitos.set(chave, {
+        ...valor,
+        turmas: [...valor.turmas].map((id) => estado.turmas.get(id)?.nome_descricao || `Turma ${id}`)
+      });
     }
   });
 
-  if (conflitos.length > 0) {
-    alertaDiv.innerHTML = `
-      ⚠️ <strong>ALERTA DE CONFLITO DE DOCENTE!</strong><br>
-      O mesmo professor possui choque de horário em turmas simultâneas:
-      <ul class="list-disc ml-5 mt-1 font-normal">
-        ${conflitos.map(c => `<li><strong>${c.professor}</strong>: ${c.dia}, ${c.aula}ª Aula</li>`).join('')}
-      </ul>
-    `;
-    alertaDiv.classList.remove('hidden');
-  }
+  return conflitos;
 }
 
+function renderizarPainelConflitos() {
+  const painel = document.getElementById('painel-alerta');
+  if (!painel) return;
+
+  const lista = [...estado.conflitos.values()];
+
+  if (!lista.length) {
+    painel.classList.add('hidden');
+    painel.innerHTML = '';
+    return;
+  }
+
+  lista.sort(
+    (a, b) => DIAS_SEMANA.indexOf(a.dia) - DIAS_SEMANA.indexOf(b.dia) || a.aula - b.aula
+  );
+
+  painel.innerHTML = `
+    ⚠️ <strong>ALERTA DE CONFLITO DE DOCENTE!</strong><br>
+    O mesmo professor está alocado em turmas diferentes no mesmo horário:
+    <ul class="list-disc ml-5 mt-1 font-normal">
+      ${lista
+        .map(
+          (c) =>
+            `<li><strong>${escapeHtml(c.professor)}</strong> — ${escapeHtml(c.dia)}, ${c.aula}ª aula (${c.turmas
+              .map(escapeHtml)
+              .join(' × ')})</li>`
+        )
+        .join('')}
+    </ul>
+  `;
+  painel.classList.remove('hidden');
+}
+
+/* ==========================================
+   LIMPEZA
+   ========================================== */
+
 function limparTelas() {
+  estado.turmaSelecionada = null;
+  estado.alocacoesTurma = [];
+  estado.gradeAlocada = {};
+  estado.conflitos = new Map();
+
   const container = document.getElementById('container-cards-disponiveis');
   if (container) {
-    container.innerHTML = '<p class="text-xs text-slate-400 italic text-center py-4">Selecione uma turma no filtro.</p>';
+    container.innerHTML =
+      '<p class="text-xs text-slate-400 italic text-center py-4">Selecione uma turma no filtro.</p>';
   }
-  renderizarEstruturaQuadro({ nome_descricao: 'MANHÃ' });
-  const alerta = document.getElementById('painel-alerta');
-  if (alerta) alerta.classList.add('hidden');
+
+  renderizarEstruturaQuadro('MANHA');
+  document.getElementById('painel-alerta')?.classList.add('hidden');
 }

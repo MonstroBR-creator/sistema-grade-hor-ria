@@ -3,22 +3,22 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Quadro semanal de horários do CEEBJA / EJA.">
   <title>Gestão de Grade Horária — CEEBJA | RASM Tecnologia</title>
+
   <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    .slot-aula.drag-over {
-      background-color: #f0f9ff;
-      border-color: #0284c7;
-    }
-  </style>
+  <link rel="stylesheet" href="css/styles.css">
+
+  <!-- data-guard="privado": redireciona para o login antes de pintar a página. -->
+  <script src="js/sessao.js" data-guard="privado"></script>
 </head>
 <body class="bg-slate-100 min-h-screen text-slate-800 flex flex-col justify-between">
 
   <div>
-    <!-- BARRA SUPERIOR (HEADER) -->
+    <!-- BARRA SUPERIOR -->
     <header class="bg-slate-900 text-white shadow-md px-6 py-3 flex justify-between items-center border-b border-slate-800">
       <div class="flex items-center gap-3">
-        <div class="bg-blue-600 text-white w-9 h-9 rounded-lg flex items-center justify-center font-bold text-lg shadow">
+        <div class="bg-blue-600 text-white w-9 h-9 rounded-lg flex items-center justify-center font-bold text-lg shadow" aria-hidden="true">
           🏫
         </div>
         <div>
@@ -27,20 +27,22 @@
         </div>
       </div>
 
-      <!-- ÁREA DO USUÁRIO, GERENCIAMENTO E LOGOUT -->
       <div class="flex items-center gap-3">
         <div class="hidden sm:flex flex-col text-right">
           <span id="nome-usuario-logado" class="text-xs font-bold text-slate-200">Carregando...</span>
-          <span id="perfil-usuario-logado" class="text-[10px] text-blue-400 uppercase font-semibold">CARREGANDO</span>
+          <span id="perfil-usuario-logado" class="text-[10px] text-blue-400 uppercase font-semibold">—</span>
         </div>
 
-        <a id="btn-gerenciar-usuarios" href="/usuarios.html" class="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-bold px-3 py-2 rounded-lg shadow transition-all flex items-center gap-1">
+        <a id="btn-gerenciar-usuarios" href="/usuarios.html"
+           class="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-bold px-3 py-2 rounded-lg shadow transition-all flex items-center gap-1">
           👤 Gerenciar Usuários
         </a>
 
-        <button onclick="fazerLogout()" class="bg-red-600/90 hover:bg-red-600 active:bg-red-700 text-white text-xs font-bold px-3 py-2 rounded-lg shadow transition-all flex items-center gap-1.5 cursor-pointer">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+        <button type="button" data-acao="sair"
+                class="bg-red-600/90 hover:bg-red-600 active:bg-red-700 text-white text-xs font-bold px-3 py-2 rounded-lg shadow transition-all flex items-center gap-1.5 cursor-pointer">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
           </svg>
           <span>Sair</span>
         </button>
@@ -49,29 +51,29 @@
 
     <!-- CONTEÚDO PRINCIPAL -->
     <main class="max-w-7xl mx-auto p-4 md:p-6 space-y-6">
-      
-      <!-- BANNER EXCLUSIVO DE MODO CONSULTA -->
+
       <div id="banner-modo-consulta" class="hidden p-3 bg-blue-50 border-l-4 border-blue-500 text-blue-800 text-xs font-bold rounded-lg shadow-sm">
         ℹ️ Você está conectado no modo SOMENTE LEITURA. A alteração de horários está desativada.
       </div>
 
       <!-- SELETOR DE TURMAS -->
-      <div class="bg-white rounded-2xl shadow-sm border border-slate-200/80 p-5">
+      <div id="bloco-seletor" class="bg-white rounded-2xl shadow-sm border border-slate-200/80 p-5">
         <label for="select-turma-unica" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
           TURMA SELECIONADA
         </label>
-        <select id="select-turma-unica" class="w-full p-3 bg-white border border-slate-300 rounded-xl text-sm font-semibold text-slate-800 shadow-sm focus:ring-2 focus:ring-blue-500 outline-none">
+        <select id="select-turma-unica"
+                class="w-full p-3 bg-white border border-slate-300 rounded-xl text-sm font-semibold text-slate-800 shadow-sm focus:ring-2 focus:ring-blue-500 outline-none">
           <option value="">Carregando turmas...</option>
         </select>
       </div>
 
       <!-- PAINEL DE ALERTA DE CONFLITOS -->
-      <div id="painel-alerta" class="hidden p-4 bg-amber-50 border-l-4 border-amber-500 text-amber-800 text-xs font-semibold rounded-xl shadow-sm"></div>
+      <div id="painel-alerta" role="status" aria-live="polite"
+           class="hidden p-4 bg-amber-50 border-l-4 border-amber-500 text-amber-800 text-xs font-semibold rounded-xl shadow-sm"></div>
 
       <!-- QUADRO E CARDS -->
       <div id="grid-principal" class="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
-        
-        <!-- COLUNA DE DISCIPLINAS / DOCENTES (Pode ser oculta) -->
+
         <div id="coluna-cards-arrastaveis" class="lg:col-span-1 bg-white rounded-2xl shadow-sm border border-slate-200/80 p-4">
           <h2 class="text-xs font-bold text-slate-700 uppercase tracking-wider mb-3 pb-2 border-b border-slate-100">
             DISCIPLINAS / DOCENTES (ARRASTE)
@@ -81,31 +83,30 @@
           </div>
         </div>
 
-        <!-- QUADRO DA GRADE HORÁRIA -->
         <div id="coluna-quadro-grade" class="lg:col-span-3 bg-white rounded-2xl shadow-sm border border-slate-200/80 p-5 overflow-x-auto">
-          <table class="w-full border-collapse border border-slate-200 text-xs text-center min-w-[650px] rounded-lg overflow-hidden">
+          <table class="w-full border-collapse border border-slate-200 text-xs text-center min-w-[650px]">
+            <caption class="sr-only">Quadro semanal de horários da turma selecionada</caption>
             <thead>
               <tr class="bg-slate-100 text-slate-700 font-bold uppercase tracking-wider border-b border-slate-200">
-                <th class="p-3 border border-slate-200 w-28">HORÁRIO</th>
-                <th class="p-3 border border-slate-200">SEGUNDA</th>
-                <th class="p-3 border border-slate-200">TERÇA</th>
-                <th class="p-3 border border-slate-200">QUARTA</th>
-                <th class="p-3 border border-slate-200">QUINTA</th>
-                <th class="p-3 border border-slate-200">SEXTA</th>
+                <th scope="col" class="p-3 border border-slate-200 w-28">HORÁRIO</th>
+                <th scope="col" class="p-3 border border-slate-200">SEGUNDA</th>
+                <th scope="col" class="p-3 border border-slate-200">TERÇA</th>
+                <th scope="col" class="p-3 border border-slate-200">QUARTA</th>
+                <th scope="col" class="p-3 border border-slate-200">QUINTA</th>
+                <th scope="col" class="p-3 border border-slate-200">SEXTA</th>
               </tr>
             </thead>
             <tbody id="corpo-quadro-grade">
-              <!-- Linhas geradas via JavaScript -->
+              <!-- Linhas geradas em js/app.js -->
             </tbody>
           </table>
         </div>
 
       </div>
-
     </main>
   </div>
 
-  <!-- RODAPÉ INSTITUCIONAL RASM TECNOLOGIA -->
+  <!-- RODAPÉ INSTITUCIONAL -->
   <footer class="w-full text-center py-4 text-slate-400 text-xs space-y-1">
     <p class="font-medium text-slate-500">
       Desenvolvido por <strong class="text-slate-700">RASM Tecnologia</strong> — CNPJ: 33.131.697/0001-99
@@ -114,41 +115,5 @@
   </footer>
 
   <script src="js/app.js"></script>
-  <script>
-    // BLOQUEIO DE INTERFACE PARA O PERFIL CONSULTA
-    document.addEventListener('DOMContentLoaded', () => {
-      const u = JSON.parse(localStorage.getItem('usuario') || '{}');
-      if (u.nome) {
-        document.getElementById('nome-usuario-logado').textContent = u.nome;
-        document.getElementById('perfil-usuario-logado').textContent = u.perfil || 'USUARIO';
-      }
-
-      if (u.perfil === 'CONSULTA') {
-        // Esconde o botão de gerenciar usuários
-        const btnUsr = document.getElementById('btn-gerenciar-usuarios');
-        if (btnUsr) btnUsr.style.display = 'none';
-
-        // Esconde a coluna lateral de arraste
-        const colCards = document.getElementById('coluna-cards-arrastaveis');
-        if (colCards) colCards.style.display = 'none';
-
-        // Expande o quadro da grade para ocupar 100% da tela
-        const colGrade = document.getElementById('coluna-quadro-grade');
-        if (colGrade) {
-          colGrade.classList.remove('lg:col-span-3');
-          colGrade.classList.add('lg:col-span-4');
-        }
-
-        // Mostra o aviso de modo de consulta
-        const banner = document.getElementById('banner-modo-consulta');
-        if (banner) banner.classList.remove('hidden');
-      }
-    });
-
-    function fazerLogout() {
-      localStorage.clear();
-      window.location.replace('/login.html');
-    }
-  </script>
 </body>
 </html>

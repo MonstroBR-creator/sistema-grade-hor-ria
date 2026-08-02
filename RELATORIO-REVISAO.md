@@ -1,11 +1,12 @@
 # Relatório de Revisão — Sistema de Grade Horária
 
-**Data:** 31/07/2026 · **Base revisada:** versão 1.2.0 → 1.3.0
-**Original preservado** em `SISTEMA HORARIO/backend` e `SISTEMA HORARIO/frontend` (nada foi alterado lá).
-**Revisão** em `SISTEMA HORARIO/revisado/`.
+**Data:** 31/07 a 01/08/2026 · **Versão:** 1.2.0 → 1.4.0
+**Branch:** `revisao/v1.4-postgres` · **Commit:** `e90b6cc`
+A versão anterior continua acessível no histórico do git (commit `ac7dd160`).
 
-**40 problemas corrigidos** (19 que já estavam se manifestando + 21 fragilidades),
-mais 2 melhorias. Nenhuma funcionalidade foi removida: login por
+**41 problemas corrigidos** (19 que já estavam se manifestando + 22 fragilidades),
+mais 2 melhorias, além da preparação para hospedagem (§7).
+Nenhuma funcionalidade foi removida: login por
 usuário ou CPF, seleção de turma agrupada, arrastar-e-soltar, alerta de conflito
 de docente, modo somente leitura e o CRUD de usuários continuam funcionando como
 antes — agora com as permissões aplicadas também no servidor.
@@ -217,7 +218,22 @@ lista de usuários protegidos que já existia.
 Alguns proxies descartam o corpo de requisições DELETE. **Correção:** a rota
 aceita corpo (como antes) **ou** query string.
 
-### 4.7 Melhorias de desempenho e retorno
+### 4.7 Cadastro duplicado viraria erro 500 em produção `[manifestando em produção]`
+`backend/server.js:191` — A detecção de nome/CPF repetido era:
+
+```js
+if (String(err.message).includes('UNIQUE'))   // → 409 "já cadastrado"
+```
+
+O SQLite diz `UNIQUE constraint failed: usuarios.usuario`; o **PostgreSQL** diz
+`duplicate key value violates unique constraint`, em minúsculas. No servidor, a
+comparação falharia e o usuário receberia **"Erro interno no servidor"** em vez
+da mensagem clara — sem pista do que estava errado.
+
+**Correção:** verificação por código de erro (`23505`) e por texto, sem
+diferenciar maiúsculas. *Encontrado ao testar contra um PostgreSQL real.*
+
+### 4.8 Melhorias de desempenho e retorno
 - `GET /api/alocacoes` aceita `?turma_id=` — o front baixava as 116 alocações e
   descartava a maioria no navegador a cada troca de turma.
 - `POST /api/grade` devolve o conflito de docente detectado, permitindo avisar
@@ -367,32 +383,102 @@ espaços invisíveis — foi assim que o problema 2.1 apareceu.
 
 ---
 
-## 7. O que foi verificado
+## 7. Preparação para publicação (Render + PostgreSQL)
+
+Não são defeitos da base: são as mudanças necessárias para o sistema funcionar
+hospedado. O histórico do repositório mostra uma tentativa anterior de migrar
+para PostgreSQL no Render, revertida — era dela que sobrava a dependência `pg`
+sem uso (item 6.2).
+
+### 7.1 SQLite não sobrevive a um deploy
+No Render o sistema de arquivos é recriado a cada deploy e a cada restart. Com
+SQLite gravando em arquivo, **toda a grade montada seria perdida** sem aviso.
+
+**Solução:** camada de banco com dois drivers em `backend/db/`:
+
+| | Local | Produção |
+|---|---|---|
+| Banco | SQLite em arquivo | PostgreSQL |
+| Escolhido por | ausência de `DATABASE_URL` | presença de `DATABASE_URL` |
+| Instalação | nenhuma | serviço do Render |
+
+O resto do sistema não sabe qual está em uso. As consultas são escritas num só
+dialeto (marcadores `?`) e o driver do PostgreSQL os converte para `$1, $2...`,
+ignorando o que estiver dentro de aspas. As diferenças de tipo (`AUTOINCREMENT`
+× `SERIAL`, `DATETIME` × `TIMESTAMP`) ficam nos dois arquivos de schema.
+
+### 7.2 O importador exigia Python e pandas
+`npm run importar` rodava `import_excel.py`. O ambiente Node do Render não tem
+Python nem pandas, então a carga da planilha simplesmente não rodaria lá.
+
+**Solução:** reescrito em Node (`backend/importar.js`), com a biblioteca `xlsx`.
+Produz exatamente o mesmo resultado do script Python — 23 turmas, 33
+disciplinas, 43 professores, 116 alocações — e funciona nos dois bancos.
+As ferramentas Python foram para `backend/legacy/`, com um README explicando as
+substituições. O sistema não depende mais de Python para nada.
+
+### 7.3 Banco novo abriria vazio
+No primeiro deploy não há nada no banco, e a tela abriria sem turma nenhuma.
+
+**Solução:** com o banco vazio, o servidor importa a planilha sozinho no start.
+A checagem é por turmas existentes, então isso **nunca** sobrescreve dados já
+gravados — nos deploys seguintes ele não mexe em nada.
+
+### 7.4 Sem descrição de infraestrutura
+**Solução:** `render.yaml` descreve o serviço web e o banco PostgreSQL, com
+`JWT_SECRET` gerado automaticamente e `MESTRE_SENHA` solicitada no painel (não
+fica no repositório).
+
+### 7.5 Repositório carregando o que não devia
+`node_modules` (246 arquivos) e o banco `grade_horaria.db` com dados reais
+estavam **versionados** — o `.gitignore` existia só em `backend/` e não os
+cobria. Como já estavam rastreados, o `.gitignore` sozinho não resolveria.
+
+**Correção:** removidos do versionamento (continuam no disco), `.gitignore` na
+raiz e `.gitattributes` normalizando quebras de linha. O repositório saiu de
+**266 para 32 arquivos**.
+
+---
+
+## 8. O que foi verificado
 
 Tudo abaixo foi executado nesta revisão, com o servidor no ar e o banco real:
 
 | Bateria | Casos | Resultado |
 |---|---|---|
-| API (autenticação, permissões, validação, CRUD) | 35 | ✅ |
+| API sobre **SQLite** — autenticação, permissões, validação, CRUD | 47 | ✅ |
+| API sobre **PostgreSQL** — a mesma bateria, servidor real | 47 | ✅ |
+| Camada de banco em PostgreSQL — schema, migração, transações, cascata | 27 | ✅ |
 | Interface do quadro (jsdom + servidor real) | 26 | ✅ |
-| Página de usuários, incluindo nome hostil | 13 | ✅ |
-| Página de login | 11 | ✅ |
-| **Total de verificações automatizadas** | **85** | **✅** |
+| Página de usuários, incluindo nome hostil | 14 | ✅ |
+| Página de login | 12 | ✅ |
 | Classificação de turmas — antes × depois, dados reais | 23 turmas | ✅ |
-| Sintaxe (`node --check`, `py_compile`) | 12 arquivos | ✅ |
-| Importação, reimportação e trava do script legado | 4 fluxos | ✅ |
+| Sintaxe (`node --check`) | 12 arquivos | ✅ |
+
+**Como o PostgreSQL foi testado:** com um servidor PostgreSQL 18 real (binários
+embarcados, sem instalação no sistema). O servidor do projeto foi iniciado
+apontando para ele, com `NODE_ENV=production` e `JWT_SECRET` — a mesma
+configuração do Render — e a bateria de API rodou contra a stack completa. Foi
+assim que o defeito 4.7 apareceu.
 
 A interface foi exercitada com **jsdom** carregando as páginas HTML reais e os
 scripts servidos pelo próprio servidor — inclusive arrastar-e-soltar com
-persistência no banco. **Não houve verificação visual em navegador**: o layout
-propriamente dito (Tailwind) não foi conferido a olho.
+persistência no banco.
+
+**O que não foi verificado:** não abri o sistema em navegador; o layout
+propriamente dito (Tailwind) não foi conferido a olho. E o deploy no Render em
+si não foi executado — o `render.yaml` e as variáveis estão escritos e o código
+foi testado contra PostgreSQL, mas o primeiro deploy real ainda vai acontecer.
 
 ---
 
-## 8. Pontos em aberto (não alterados)
+## 9. Pontos em aberto (não alterados)
 
 Nenhum destes é defeito; ficam registrados para sua decisão.
 
+0. **O plano gratuito do PostgreSQL no Render expira** e o banco é removido
+   junto com os dados. Para uso real da escola, vale um plano pago ou um backup
+   periódico (`pg_dump`). É o ponto mais importante desta lista.
 1. **Tailwind via CDN** — as páginas carregam `cdn.tailwindcss.com`, que é a
    versão de desenvolvimento e exige internet. Trocar por uma build local
    melhora desempenho e permite uso off-line, mas adiciona etapa de build.

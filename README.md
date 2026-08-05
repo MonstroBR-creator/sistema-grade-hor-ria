@@ -98,14 +98,65 @@ contas, edite `PERFIS_GESTAO_USUARIOS`.
 
 ---
 
+## Atualizar matérias, professores e turmas
+
+A fonte da verdade é a planilha `backend/data/professores.xlsx`. Para mudar
+qualquer coisa — trocar o professor de uma disciplina, incluir uma matéria nova,
+corrigir o nome de uma turma — edite a planilha e rode:
+
+```bash
+npm run importar
+```
+
+**A grade já montada é preservada.** A importação compara a planilha com o banco
+em vez de apagar tudo: o que continua igual mantém o mesmo registro, e as aulas
+seguem no lugar onde foram posicionadas. Só sai da grade aquilo que realmente
+saiu da planilha — e o comando avisa quantas aulas isso afetou:
+
+```
+• Alocações ....... 162  (3 novas, 159 mantidas, 0 removidas)
+⚠️  Aulas que saíram da grade junto com alocações removidas: 2
+```
+
+Dá para rodar quantas vezes quiser, a qualquer momento. Rodar duas vezes seguidas
+sem mudar a planilha não altera nada (`0 novas, 0 removidas`).
+
+Antes de uma mudança grande, vale conferir o que a planilha tem sem gravar nada:
+
+```bash
+npm run inspecionar
+```
+
+> Para atualizar o **banco de produção**, defina `DATABASE_URL` antes do comando.
+> Não existe tela de edição de matérias: tudo passa pela planilha.
+
+### Turmas semipresenciais
+
+Nas turmas cujo nome contém SEMIPRESENCIAL, cada disciplina rende **três** cards:
+
+| Card | Responsável | Tipo |
+|---|---|---|
+| Aula com o docente | nome do professor | `SEMIPRESENCIAL` |
+| Tutoria | `TUTORIA` | `TUTORIA` |
+| Ensino a distância | `EAD` | `EAD` |
+
+Os cards de tutoria e EAD não têm professor atribuído — no lugar do nome aparece
+a própria modalidade. Por não terem docente, também não entram na checagem de
+choque de horário.
+
+Isso é gerado automaticamente pela importação; não é preciso repetir as linhas
+na planilha.
+
+---
+
 ## Comandos
 
 | Comando | O que faz |
 |---|---|
 | `npm start` | Sobe o servidor |
 | `npm run dev` | Sobe com recarga automática |
-| `npm run importar` | Recarrega a planilha (preserva as contas de acesso) |
-| `npm run importar -- --reset` | Recarrega **apagando também** as contas |
+| `npm run importar` | Atualiza a partir da planilha, **preservando a grade montada** |
+| `npm run importar -- --reset` | Recomeça do zero, apagando inclusive as contas |
 | `npm run inspecionar` | Analisa a planilha sem gravar nada |
 | `npm run conferir` | Mostra o que está gravado no banco |
 

@@ -39,6 +39,35 @@ const HORARIOS_TURNO = {
   ]
 };
 
+/**
+ * Modalidades sem docente: nas turmas semipresenciais, cada disciplina aparece
+ * também como TUTORIA e como EAD. Nesses cards, o lugar do nome do professor
+ * mostra a própria modalidade.
+ */
+const MODALIDADES = {
+  TUTORIA: {
+    rotulo: 'TUTORIA',
+    icone: '👥',
+    cores: 'bg-emerald-50/60 border-emerald-200',
+    selo: 'bg-emerald-200/80 text-emerald-800',
+    texto: 'text-emerald-800 font-semibold'
+  },
+  EAD: {
+    rotulo: 'EAD',
+    icone: '🖥️',
+    cores: 'bg-purple-50/60 border-purple-200',
+    selo: 'bg-purple-200/80 text-purple-800',
+    texto: 'text-purple-800 font-semibold'
+  }
+};
+
+/** O que aparece na linha de baixo do card: o professor ou a modalidade. */
+function responsavelDa(alocacao) {
+  const modalidade = MODALIDADES[String(alocacao?.tipo || '').toUpperCase()];
+  if (modalidade) return modalidade.rotulo;
+  return alocacao?.professor_nome || 'A DEFINIR';
+}
+
 /** Ordem de exibição dos grupos no seletor de turmas. */
 const CATEGORIAS = [
   { chave: 'MANHA_FUNDAMENTAL', label: '📍 MANHÃ — ENSINO FUNDAMENTAL' },
@@ -299,34 +328,29 @@ function renderizarCardsDisponiveis() {
 
   estado.alocacoesTurma.forEach((item) => {
     const tipo = String(item.tipo || '').toUpperCase();
-    const professor = item.professor_nome || 'A DEFINIR';
-    const semProfessor = professor === 'A DEFINIR';
+    const modalidade = MODALIDADES[tipo];
+    const responsavel = responsavelDa(item);
+    const semProfessor = !modalidade && responsavel === 'A DEFINIR';
 
     let cores = 'bg-white border-slate-200';
     let selo = '';
     let icone = semProfessor ? '⚠️' : '👤';
+    let corResponsavel = semProfessor ? 'text-amber-600 font-bold' : 'text-slate-600';
 
-    if (tipo.includes('SISTEMA') || tipo.includes('ONLINE')) {
-      cores = 'bg-purple-50/60 border-purple-200';
-      selo = '<span class="bg-purple-200/80 text-purple-800 text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider">SISTEMA</span>';
-      icone = '💻';
-    } else if (tipo.includes('TUTORIA')) {
-      cores = 'bg-emerald-50/60 border-emerald-200';
-      selo = '<span class="bg-emerald-200/80 text-emerald-800 text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider">TUTORIA</span>';
-      icone = '👥';
+    if (modalidade) {
+      // TUTORIA e EAD: não têm docente, então a linha de baixo traz a modalidade.
+      cores = modalidade.cores;
+      icone = modalidade.icone;
+      corResponsavel = modalidade.texto;
+      selo = `<span class="${modalidade.selo} text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider">${modalidade.rotulo}</span>`;
     } else if (tipo.includes('SEMI')) {
-      // O importador antes gravava 'PRESENCIAL' para todas as alocações; agora o
-      // tipo vem da descrição da turma e as semipresenciais ganham selo próprio.
       cores = 'bg-sky-50/60 border-sky-200';
-      selo = '<span class="bg-sky-200/80 text-sky-800 text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider">SEMI</span>';
-      icone = '📘';
+      selo = '<span class="bg-sky-200/80 text-sky-800 text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider">PRESENCIAL</span>';
+      icone = semProfessor ? '⚠️' : '👤';
     }
 
-    const corProfessor = semProfessor
-      ? 'text-amber-600 font-bold'
-      : tipo.includes('TUTORIA')
-        ? 'text-emerald-800 font-semibold'
-        : 'text-slate-600';
+    const corProfessor = corResponsavel;
+    const professor = responsavel;
 
     const card = document.createElement('div');
     card.className = `card-materia p-3.5 border rounded-xl shadow-sm hover:shadow-md mb-3 relative ${cores}`;
@@ -377,11 +401,15 @@ function atualizarQuadroGrade() {
         celula.classList.add('celula-conflito');
       }
 
+      const modalidade = MODALIDADES[String(alocacao.tipo || '').toUpperCase()];
+
       const cartao = document.createElement('div');
-      cartao.className = 'p-2 bg-blue-50 border border-blue-200 rounded-lg text-left relative group shadow-sm';
+      cartao.className = modalidade
+        ? `p-2 border rounded-lg text-left relative group shadow-sm ${modalidade.cores}`
+        : 'p-2 bg-blue-50 border border-blue-200 rounded-lg text-left relative group shadow-sm';
       cartao.innerHTML = `
         <div class="font-bold text-slate-800 text-[11px]">${escapeHtml(alocacao.disciplina_nome)}</div>
-        <div class="text-[10px] text-slate-500 mt-0.5">${escapeHtml(alocacao.professor_nome)}</div>
+        <div class="text-[10px] mt-0.5 ${modalidade ? modalidade.texto : 'text-slate-500'}">${escapeHtml(responsavelDa(alocacao))}</div>
       `;
 
       if (!somenteLeitura()) {

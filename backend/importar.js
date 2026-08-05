@@ -26,6 +26,12 @@ const TABELAS_ACADEMICAS = ['grade_horaria', 'alocacoes', 'turmas', 'disciplinas
 
 const VAZIOS = new Set(['', 'NAN', 'NONE', 'NULL', '-', 'UNDEFINED']);
 
+/**
+ * Nas turmas semipresenciais cada disciplina rende, além do card com o
+ * professor, mais um de tutoria e um de EAD — que não têm docente atribuído.
+ */
+const MODALIDADES_SEMIPRESENCIAL = ['TUTORIA', 'EAD'];
+
 /* ==========================================
    LEITURA DA PLANILHA
    ========================================== */
@@ -93,8 +99,8 @@ function tipoDaTurma(descricao) {
    IMPORTAÇÃO
    ========================================== */
 
-async function limparTabelas(banco, resetTotal) {
-  const alvos = resetTotal ? [...TABELAS_ACADEMICAS, 'usuarios'] : [...TABELAS_ACADEMICAS];
+async function limparTudo(banco) {
+  const alvos = [...TABELAS_ACADEMICAS, 'usuarios'];
 
   if (banco.dialeto === 'postgres') {
     await banco.executar(`TRUNCATE ${alvos.join(', ')} RESTART IDENTITY CASCADE`);
@@ -122,6 +128,21 @@ function criarResolvedor(banco, tabela, coluna, cache) {
   };
 }
 
+const chaveAlocacao = (turmaId, disciplinaId, professorId, tipo) =>
+  `${turmaId}|${disciplinaId}|${professorId ?? '-'}|${tipo}`;
+
+/**
+ * Reimportação NÃO destrutiva.
+ *
+ * A versão anterior apagava todas as tabelas acadêmicas e recarregava, o que
+ * levava junto a grade já montada (grade_horaria aponta para alocacoes com
+ * ON DELETE CASCADE). Na prática, atualizar a planilha custava todo o trabalho
+ * de montagem do horário.
+ *
+ * Agora a planilha é comparada com o que já está no banco: o que continua igual
+ * mantém o mesmo id — e portanto a aula seguem posicionada na grade. Só é
+ * removido o que realmente saiu da planilha.
+ */
 async function importar(banco, { caminho = PLANILHA_PADRAO, resetTotal = false, silencioso = false } = {}) {
   const registrar = silencioso ? () => {} : (...a) => console.log(...a);
 
@@ -129,12 +150,10 @@ async function importar(banco, { caminho = PLANILHA_PADRAO, resetTotal = false, 
   registrar(`📄 ${linhas.length} linha(s) lida(s) de ${path.basename(caminho)}.`);
 
   return banco.transacao(async () => {
-    await limparTabelas(banco, resetTotal);
-    registrar(
-      resetTotal
-        ? '🧹 Banco reiniciado por completo (contas de acesso incluídas).'
-        : '🧹 Tabelas acadêmicas limpas (contas de acesso preservadas).'
-    );
+    if (resetTotal) {
+      await limparTudo(banco);
+      registrar('🧹 Banco reiniciado por completo (contas de acesso incluídas).');
+    }
 
     const turnos = await banco.buscarTodos(`SELECT id, codigo FROM turnos`);
     const turnoPorCodigo = new Map(turnos.map((t) => [t.codigo, t.id]));
@@ -142,13 +161,16 @@ async function importar(banco, { caminho = PLANILHA_PADRAO, resetTotal = false, 
     const cacheTurmas = new Map();
     const cacheDisciplinas = new Map();
     const cacheProfessores = new Map();
-    const alocacoesVistas = new Set();
 
     const resolverDisciplina = criarResolvedor(banco, 'disciplinas', 'nome', cacheDisciplinas);
     const resolverProfessor = criarResolvedor(banco, 'professores', 'nome', cacheProfessores);
 
     let ignoradas = 0;
     let duplicadas = 0;
+
+    /* ---------- 1. O que a planilha pede ---------- */
+    const desejadas = new Map();
+    const linhasVistas = new Set();
 
     for (const linha of linhas) {
       const descricao = texto(linha['TURMA DESCRITA']);
@@ -163,7 +185,6 @@ async function importar(banco, { caminho = PLANILHA_PADRAO, resetTotal = false, 
 
       const nomeTurma = letra ? `${descricao} (Turma ${letra})` : descricao;
 
-      // --- Turma ---
       if (!cacheTurmas.has(nomeTurma)) {
         const turnoId = turnoPorCodigo.get(codigoDoTurno(descricao, letra)) || turnos[0].id;
         await banco.executar(
@@ -175,31 +196,107 @@ async function importar(banco, { caminho = PLANILHA_PADRAO, resetTotal = false, 
         cacheTurmas.set(nomeTurma, t.id);
       }
       const turmaId = cacheTurmas.get(nomeTurma);
-
       const disciplinaId = await resolverDisciplina(disciplina);
-
       const professorId =
         professor && professor.toUpperCase() !== 'A DEFINIR' ? await resolverProfessor(professor) : null;
 
-      // --- Alocação (sem repetir a mesma combinação) ---
-      const chave = `${turmaId}|${disciplinaId}|${professorId ?? '-'}`;
-      if (alocacoesVistas.has(chave)) {
+      // Linha repetida na planilha: conta uma vez só.
+      const chaveLinha = `${turmaId}|${disciplinaId}|${professorId ?? '-'}`;
+      if (linhasVistas.has(chaveLinha)) {
         duplicadas += 1;
         continue;
       }
-      alocacoesVistas.add(chave);
+      linhasVistas.add(chaveLinha);
 
-      await banco.executar(
-        `INSERT INTO alocacoes (turma_id, disciplina_id, professor_id, tipo) VALUES (?, ?, ?, ?)`,
-        [turmaId, disciplinaId, professorId, tipoDaTurma(descricao)]
-      );
+      const tipoTurma = tipoDaTurma(descricao);
+
+      // Cada disciplina rende um card com o professor e, nas turmas
+      // semipresenciais, mais um de TUTORIA e um de EAD — sem professor.
+      const variantes = [{ professorId, tipo: tipoTurma }];
+      if (tipoTurma === 'SEMIPRESENCIAL') {
+        for (const modalidade of MODALIDADES_SEMIPRESENCIAL) {
+          variantes.push({ professorId: null, tipo: modalidade });
+        }
+      }
+
+      for (const v of variantes) {
+        desejadas.set(chaveAlocacao(turmaId, disciplinaId, v.professorId, v.tipo), {
+          turmaId,
+          disciplinaId,
+          professorId: v.professorId,
+          tipo: v.tipo
+        });
+      }
     }
 
+    /* ---------- 2. O que já existe ---------- */
+    const existentes = await banco.buscarTodos(
+      `SELECT id, turma_id, disciplina_id, professor_id, tipo FROM alocacoes`
+    );
+    const porChave = new Map(
+      existentes.map((a) => [chaveAlocacao(a.turma_id, a.disciplina_id, a.professor_id, a.tipo), a.id])
+    );
+
+    /* ---------- 3. Insere o que falta ---------- */
+    let inseridas = 0;
+    let mantidas = 0;
+
+    for (const [chave, a] of desejadas) {
+      if (porChave.has(chave)) {
+        mantidas += 1;
+        continue;
+      }
+      await banco.executar(
+        `INSERT INTO alocacoes (turma_id, disciplina_id, professor_id, tipo) VALUES (?, ?, ?, ?)`,
+        [a.turmaId, a.disciplinaId, a.professorId, a.tipo]
+      );
+      inseridas += 1;
+    }
+
+    /* ---------- 4. Remove só o que saiu da planilha ---------- */
+    const obsoletas = [...porChave].filter(([chave]) => !desejadas.has(chave)).map(([, id]) => id);
+    let aulasPerdidas = 0;
+
+    if (obsoletas.length) {
+      const marcadores = obsoletas.map(() => '?').join(', ');
+      const { total } = await banco.buscarUm(
+        `SELECT COUNT(*) AS total FROM grade_horaria WHERE alocacao_id IN (${marcadores})`,
+        obsoletas
+      );
+      aulasPerdidas = Number(total);
+      await banco.executar(`DELETE FROM alocacoes WHERE id IN (${marcadores})`, obsoletas);
+    }
+
+    // Turmas que sumiram da planilha, e cadastros que ficaram sem uso.
+    const idsTurmas = [...cacheTurmas.values()];
+    let turmasRemovidas = 0;
+    if (idsTurmas.length) {
+      const marcadores = idsTurmas.map(() => '?').join(', ');
+      const r = await banco.executar(`DELETE FROM turmas WHERE id NOT IN (${marcadores})`, idsTurmas);
+      turmasRemovidas = r.changes || 0;
+    }
+    await banco.executar(
+      `DELETE FROM disciplinas WHERE id NOT IN (SELECT DISTINCT disciplina_id FROM alocacoes)`
+    );
+    await banco.executar(
+      `DELETE FROM professores WHERE id NOT IN
+         (SELECT DISTINCT professor_id FROM alocacoes WHERE professor_id IS NOT NULL)`
+    );
+
+    /* ---------- 5. Resumo ---------- */
+    const contar = async (tabela) =>
+      Number((await banco.buscarUm(`SELECT COUNT(*) AS total FROM ${tabela}`)).total);
+
     const resumo = {
-      turmas: cacheTurmas.size,
-      disciplinas: cacheDisciplinas.size,
-      professores: cacheProfessores.size,
-      alocacoes: alocacoesVistas.size,
+      turmas: await contar('turmas'),
+      disciplinas: await contar('disciplinas'),
+      professores: await contar('professores'),
+      alocacoes: await contar('alocacoes'),
+      inseridas,
+      mantidas,
+      removidas: obsoletas.length,
+      turmasRemovidas,
+      aulasPerdidas,
       ignoradas,
       duplicadas
     };
@@ -208,7 +305,9 @@ async function importar(banco, { caminho = PLANILHA_PADRAO, resetTotal = false, 
     registrar(`   • Turmas .......... ${resumo.turmas}`);
     registrar(`   • Disciplinas ..... ${resumo.disciplinas}`);
     registrar(`   • Professores ..... ${resumo.professores}`);
-    registrar(`   • Alocações ....... ${resumo.alocacoes}`);
+    registrar(`   • Alocações ....... ${resumo.alocacoes}  (${inseridas} novas, ${mantidas} mantidas, ${obsoletas.length} removidas)`);
+    if (turmasRemovidas) registrar(`   • Turmas removidas (fora da planilha): ${turmasRemovidas}`);
+    if (aulasPerdidas) registrar(`   ⚠️  Aulas que saíram da grade junto com alocações removidas: ${aulasPerdidas}`);
     if (ignoradas) registrar(`   • Linhas ignoradas (sem turma/disciplina): ${ignoradas}`);
     if (duplicadas) registrar(`   • Linhas duplicadas descartadas: ${duplicadas}`);
 

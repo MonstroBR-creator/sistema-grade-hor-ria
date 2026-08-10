@@ -121,6 +121,8 @@ async function contarTurmas() {
 module.exports = {
   USUARIO_MESTRE,
   inicializar,
+  /** Recria a conta mestre se ela não existir (usado após um `--reset`). */
+  garantirContaMestre: semearUsuarioMestre,
   contarTurmas,
   get dialeto() {
     return driver?.dialeto;

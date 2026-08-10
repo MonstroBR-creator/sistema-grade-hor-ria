@@ -152,7 +152,10 @@ async function importar(banco, { caminho = PLANILHA_PADRAO, resetTotal = false, 
   return banco.transacao(async () => {
     if (resetTotal) {
       await limparTudo(banco);
-      registrar('🧹 Banco reiniciado por completo (contas de acesso incluídas).');
+      // Sem isto o sistema ficava sem NENHUMA conta de acesso até o próximo
+      // start do servidor — ninguém conseguia entrar depois de um --reset.
+      if (typeof banco.garantirContaMestre === 'function') await banco.garantirContaMestre();
+      registrar('🧹 Banco reiniciado por completo; conta mestre recriada.');
     }
 
     const turnos = await banco.buscarTodos(`SELECT id, codigo FROM turnos`);

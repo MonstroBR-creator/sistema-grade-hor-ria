@@ -334,12 +334,17 @@ app.get(
   '/api/grade',
   autenticar,
   rota(async (req, res) => {
+    // O turno vem junto porque a detecção de choque de horário depende dele:
+    // "1ª aula" é 07:50 na manhã, 13:30 na tarde e 18:15 na noite.
     const linhas = await banco.buscarTodos(
       `SELECT g.id, g.turma_id, g.dia_semana, g.num_aula, g.alocacao_id,
-              d.nome AS disciplina_nome, COALESCE(p.nome, 'A DEFINIR') AS professor_nome, a.tipo
+              d.nome AS disciplina_nome, COALESCE(p.nome, 'A DEFINIR') AS professor_nome, a.tipo,
+              tu.codigo AS turno_codigo, tu.nome AS turno_nome
          FROM grade_horaria g
          JOIN alocacoes a ON g.alocacao_id = a.id
          JOIN disciplinas d ON a.disciplina_id = d.id
+         JOIN turmas t ON g.turma_id = t.id
+         JOIN turnos tu ON t.turno_id = tu.id
          LEFT JOIN professores p ON a.professor_id = p.id`
     );
     res.json(linhas);
@@ -402,15 +407,19 @@ app.post(
     // Aviso (não bloqueante) de choque de horário do mesmo professor em outra turma.
     let conflito = null;
     if (alocacao.professor_nome !== 'A DEFINIR') {
+      // Só é choque de verdade se for no MESMO turno: a 1ª aula da manhã e a 1ª
+      // da noite são horários diferentes.
       conflito = await banco.buscarUm(
-        `SELECT t.nome_descricao AS turma
+        `SELECT t.nome_descricao AS turma, tu.nome AS turno
            FROM grade_horaria g
            JOIN alocacoes a ON g.alocacao_id = a.id
            JOIN turmas t ON g.turma_id = t.id
+           JOIN turnos tu ON t.turno_id = tu.id
           WHERE a.professor_id = (SELECT professor_id FROM alocacoes WHERE id = ?)
             AND g.dia_semana = ? AND g.num_aula = ? AND g.turma_id <> ?
+            AND t.turno_id = (SELECT turno_id FROM turmas WHERE id = ?)
           LIMIT 1`,
-        [alocacaoId, posicao.diaSemana, posicao.numAula, posicao.turmaId]
+        [alocacaoId, posicao.diaSemana, posicao.numAula, posicao.turmaId, posicao.turmaId]
       );
     }
 

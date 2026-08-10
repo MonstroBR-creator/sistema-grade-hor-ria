@@ -397,7 +397,8 @@ function atualizarQuadroGrade() {
         return;
       }
 
-      if (estado.conflitos.has(chaveConflito(alocacao.professor_nome, dia, aula))) {
+      const turnoAtual = codigoTurno(estado.turmaSelecionada);
+      if (estado.conflitos.has(chaveConflito(alocacao.professor_nome, dia, turnoAtual, aula))) {
         celula.classList.add('celula-conflito');
       }
 
@@ -493,13 +494,27 @@ async function removerAulaGrade(dia, numAula) {
    CONFLITOS DE DOCENTE
    ========================================== */
 
-const chaveConflito = (professor, dia, aula) => `${professor}|${dia}|${aula}`;
+/**
+ * A chave inclui o TURNO. A 1ª aula da manhã começa 07:50, a da tarde 13:30 e a
+ * da noite 18:15 — sem o turno, o mesmo professor em turmas de turnos
+ * diferentes aparecia como choque de horário sem haver choque nenhum.
+ */
+const chaveConflito = (professor, dia, turno, aula) => `${professor}|${dia}|${turno}|${aula}`;
+
+/** Código do turno (A/B/C) de uma turma, com o texto da descrição como plano B. */
+function codigoTurno(turma) {
+  const codigo = String(turma?.turno_codigo || '').toUpperCase();
+  if (codigo) return codigo;
+  return { MANHA: 'A', TARDE: 'B', NOITE: 'C' }[turnoDaTurma(turma)] || 'A';
+}
 
 /**
- * Agrupa a grade inteira por professor/dia/aula e reporta apenas os grupos que
- * envolvem MAIS DE UMA turma.
- * A versão anterior comparava uma única turma guardada por chave e empurrava um
- * item repetido para a lista a cada ocorrência extra, gerando alertas duplicados.
+ * Agrupa a grade por professor/dia/turno/aula e reporta apenas os grupos que
+ * envolvem MAIS DE UMA turma — ou seja, choque de horário de verdade.
+ *
+ * O turno é essencial: "1ª aula" é 07:50 na manhã, 13:30 na tarde e 18:15 na
+ * noite. Sem ele, um professor que dá aula de manhã numa turma e à noite em
+ * outra era acusado de conflito.
  */
 function calcularConflitos(grade) {
   const agrupado = new Map();
@@ -508,9 +523,18 @@ function calcularConflitos(grade) {
     const professor = String(g.professor_nome || '').trim();
     if (!professor || professor === 'A DEFINIR') return;
 
-    const chave = chaveConflito(professor, g.dia_semana, g.num_aula);
+    const turno = String(g.turno_codigo || codigoTurno(estado.turmas.get(String(g.turma_id)))).toUpperCase();
+    const chave = chaveConflito(professor, g.dia_semana, turno, g.num_aula);
+
     if (!agrupado.has(chave)) {
-      agrupado.set(chave, { professor, dia: g.dia_semana, aula: g.num_aula, turmas: new Set() });
+      agrupado.set(chave, {
+        professor,
+        dia: g.dia_semana,
+        aula: g.num_aula,
+        turno,
+        turnoNome: g.turno_nome || '',
+        turmas: new Set()
+      });
     }
     agrupado.get(chave).turmas.add(String(g.turma_id));
   });
@@ -541,8 +565,13 @@ function renderizarPainelConflitos() {
   }
 
   lista.sort(
-    (a, b) => DIAS_SEMANA.indexOf(a.dia) - DIAS_SEMANA.indexOf(b.dia) || a.aula - b.aula
+    (a, b) =>
+      DIAS_SEMANA.indexOf(a.dia) - DIAS_SEMANA.indexOf(b.dia) ||
+      String(a.turno).localeCompare(String(b.turno)) ||
+      a.aula - b.aula
   );
+
+  const nomeTurno = (c) => c.turnoNome || { A: 'Manhã', B: 'Tarde', C: 'Noite' }[c.turno] || c.turno;
 
   painel.innerHTML = `
     ⚠️ <strong>ALERTA DE CONFLITO DE DOCENTE!</strong><br>
@@ -551,7 +580,7 @@ function renderizarPainelConflitos() {
       ${lista
         .map(
           (c) =>
-            `<li><strong>${escapeHtml(c.professor)}</strong> — ${escapeHtml(c.dia)}, ${c.aula}ª aula (${c.turmas
+            `<li><strong>${escapeHtml(c.professor)}</strong> — ${escapeHtml(c.dia)}, ${c.aula}ª aula (${escapeHtml(nomeTurno(c))}) (${c.turmas
               .map(escapeHtml)
               .join(' × ')})</li>`
         )

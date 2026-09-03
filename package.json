@@ -12,7 +12,8 @@
     "dev": "node --watch backend/server.js",
     "importar": "node backend/importar.js",
     "inspecionar": "node backend/importar.js --inspecionar",
-    "conferir": "node backend/conferir.js"
+    "conferir": "node backend/conferir.js",
+    "backup": "node backend/backup.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

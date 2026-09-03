@@ -8,12 +8,10 @@
 # confira as variáveis abaixo no painel do serviço.
 # ============================================================
 
-databases:
-  - name: grade-horaria-db
-    databaseName: grade_horaria
-    user: grade_horaria
-    plan: free          # o plano gratuito do Postgres expira; veja o README
-    postgresMajorVersion: "16"
+# O banco NAO fica mais no Render: e um PostgreSQL no Neon (neon.tech), cujo
+# plano gratuito nao expira. O gratuito do Render expira 30 dias apos a criacao
+# e depois e apagado — foi o que aconteceu em 30/08/2026.
+# A DATABASE_URL e colada a mao no painel do servico.
 
 services:
   - type: web
@@ -30,10 +28,10 @@ services:
         value: production
 
       # Ligação com o banco acima. O Render preenche o valor sozinho.
+      # Connection string do Neon. sync:false = solicitada no painel, nunca
+      # fica no repositorio.
       - key: DATABASE_URL
-        fromDatabase:
-          name: grade-horaria-db
-          property: connectionString
+        sync: false
 
       # Chave de assinatura das sessões. generateValue cria um valor aleatório
       # na primeira vez e nunca mais o altera.

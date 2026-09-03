@@ -47,6 +47,44 @@ não pode ser atribuído a nenhuma conta nova — existe um mestre só.
 
 ---
 
+## Backup
+
+```bash
+npm run backup
+```
+
+Grava um `.sql` restaurável em `backups/`, com carimbo de data. Para restaurar
+em qualquer PostgreSQL:
+
+```bash
+psql "<connection-string>" -f backups/grade-horaria_AAAAMMDD_HHMM.sql
+```
+
+Rode contra o banco de produção definindo `DATABASE_URL` antes do comando.
+**Faça isso com regularidade** — a pasta `backups/` está no `.gitignore` porque
+os arquivos contêm CPF e hashes de senha.
+
+> Todo `INSERT` sai com `ON CONFLICT DO NOTHING`. Sem isso o arquivo não
+> restaurava: o schema já semeia os 3 turnos e a seção de dados tentava inserir
+> os mesmos ids, derrubando a transação inteira.
+
+## Banco de dados
+
+Em produção o banco é **PostgreSQL no Neon** (plano gratuito, sem prazo de
+validade; a computação hiberna após 5 minutos parada e volta sozinha).
+
+Quando a `DATABASE_URL` aponta para um host `*.neon.tech`, o sistema usa o driver
+serverless do Neon, que conversa por **WebSocket na porta 443** em vez da 5432.
+Isso não é detalhe: muitas redes domésticas e operadoras bloqueiam a 5432, e sem
+esse caminho os comandos `npm run backup`, `npm run importar` e `npm run conferir`
+não conectariam da sua máquina — embora funcionassem no servidor.
+
+Para descobrir se a sua rede bloqueia a 5432:
+
+```bash
+node -e "require('net').connect(5432,'ep-seu-endpoint.neon.tech',()=>console.log('porta aberta')).on('error',e=>console.log('bloqueada:',e.message))"
+```
+
 ## Publicar no Render
 
 O arquivo [`render.yaml`](render.yaml) descreve o serviço web e o banco
@@ -56,7 +94,7 @@ O que precisa estar configurado no serviço:
 
 | Variável | Valor |
 |---|---|
-| `DATABASE_URL` | ligada ao banco PostgreSQL (o Render preenche) |
+| `DATABASE_URL` | connection string do **Neon** (colada à mão, não é gerada pelo Render) |
 | `JWT_SECRET` | valor aleatório — **sem ele o servidor não inicia em produção** |
 | `NODE_ENV` | `production` |
 | `MESTRE_SENHA` | a senha do mestre, definida **antes do primeiro deploy** |
@@ -67,9 +105,11 @@ No primeiro deploy o banco está vazio, então o servidor cria as tabelas, a con
 mestre e importa a planilha automaticamente. Nos deploys seguintes ele encontra
 dados e **não** mexe em nada.
 
-> **Atenção ao plano gratuito do PostgreSQL no Render:** ele expira depois de um
-> período e o banco é removido junto com os dados. Para uso real da escola, vale
-> um plano pago ou um backup periódico (`pg_dump`).
+> **Histórico:** o banco ficava no PostgreSQL gratuito do Render, que **expira 30
+> dias após a criação** e é apagado 14 dias depois. Foi o que aconteceu em
+> 30/08/2026, derrubando o site e levando parte da grade montada. Por isso o banco
+> mudou para o Neon, cujo plano gratuito não tem prazo de validade — e por isso
+> `npm run backup` existe.
 
 ### Por que PostgreSQL e não SQLite no servidor
 
@@ -159,6 +199,7 @@ na planilha.
 | `npm run importar -- --reset` | Recomeça do zero, apagando inclusive as contas |
 | `npm run inspecionar` | Analisa a planilha sem gravar nada |
 | `npm run conferir` | Mostra o que está gravado no banco |
+| `npm run backup` | Gera um `.sql` restaurável em `backups/` |
 
 Todos funcionam igual em SQLite e PostgreSQL. Para rodar contra o banco de
 produção, defina `DATABASE_URL` antes do comando.

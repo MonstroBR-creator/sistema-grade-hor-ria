@@ -44,15 +44,35 @@ function precisaSsl(url) {
   return !/@(localhost|127\.0\.0\.1)/.test(url);
 }
 
-function criar({ url } = {}) {
-  const conexao = url || process.env.DATABASE_URL;
-  if (!conexao) throw new Error('DATABASE_URL não definida.');
 
-  const pool = new Pool({
+/**
+ * Escolhe o transporte da conexão.
+ *
+ * O Neon aceita conexões pelo driver serverless por WebSocket na porta 443,
+ * além da porta 5432 padrão. Isso importa porque muitas redes domésticas e
+ * corporativas bloqueiam a 5432 — sem este caminho, comandos como
+ * `npm run backup` e `npm run importar` simplesmente não conectam de casa,
+ * embora funcionem no servidor. A interface é a mesma nos dois casos.
+ */
+function criarPool(conexao) {
+  if (/\.neon\.tech/i.test(conexao)) {
+    const { Pool: PoolNeon, neonConfig } = require('@neondatabase/serverless');
+    neonConfig.webSocketConstructor = require('ws');
+    return new PoolNeon({ connectionString: conexao });
+  }
+
+  return new Pool({
     connectionString: conexao,
     ssl: precisaSsl(conexao) ? { rejectUnauthorized: false } : false,
     max: Number(process.env.PGPOOL_MAX || 5)
   });
+}
+
+function criar({ url } = {}) {
+  const conexao = url || process.env.DATABASE_URL;
+  if (!conexao) throw new Error('DATABASE_URL não definida.');
+
+  const pool = criarPool(conexao);
 
   // Um erro num cliente ocioso do pool derruba o processo se não for tratado.
   pool.on('error', (err) => console.error('⚠️  Erro em conexão ociosa do PostgreSQL:', err.message));

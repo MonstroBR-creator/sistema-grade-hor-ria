@@ -12,3 +12,6 @@ backend/database/*.db-shm
 # Artefatos Python
 __pycache__/
 *.pyc
+
+# Backups gerados por `npm run backup` (contem CPF e hashes de senha)
+backups/

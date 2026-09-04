@@ -1,0 +1,22 @@
+{
+  // Reduz o consumo de memoria do editor neste projeto.
+  // node_modules e backups tem muitos arquivos; vigiar e indexar tudo isso
+  // faz o editor abrir varios processos auxiliares sem necessidade.
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/backups/**": true,
+    "**/backend/database/**": true,
+    "**/.git/objects/**": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/backups": true,
+    "**/package-lock.json": true
+  },
+  "files.exclude": {
+    "**/__pycache__": true
+  },
+  // O projeto e JavaScript puro, sem TypeScript: o servidor de TS so consome memoria.
+  "typescript.tsserver.maxTsServerMemory": 512,
+  "javascript.suggest.autoImports": false
+}
